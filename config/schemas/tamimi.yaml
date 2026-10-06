@@ -1,0 +1,21 @@
+retailer: Tamimi
+
+essential_columns:
+  - Store
+  - Store ID
+  - Product
+  - Product ID
+  - Brand
+  - H1:Category
+  - Selling_Unit
+  - Sales Exc Tax
+  - Units
+  - Volume
+
+rename_map:
+  Store: "STORE_DESCRIPTION"
+  Product ID: "SKU"
+  Product: "SKU_DESCRIPTION"
+  Selling_Unit: "SALES_UNIT"
+  Sales Exc Tax: "Sales_Amount"
+  Sales Qty: "Sales_Quantity"

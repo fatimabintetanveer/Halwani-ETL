@@ -1,0 +1,23 @@
+retailer: Othaim
+
+essential_columns:
+  - ItemID
+  - ItemEnglishDescriptionWithNumber
+  - StoreNumber
+  - Sum of Total_NetSale
+  - Sum of Total_Quantity
+
+rename_map:
+  ItemID: "SKU"
+  ItemEnglishDescriptionWithNumber: "SKU_DESCRIPTION"
+  VendorNameWithNumber: "VENDOR_NAME_WITH_NUMBER"
+  D5_SubClassName: "D5_SUB_CLASS_NAME"
+  D4_ClassName: "D4_CLASS_NAME"
+  D3_SubDepartmentName: "D3_SUB_DEPARTMENT_NAME"
+  D2_DepartmentName: "D2_DEPARTMENT_NAME"
+  StoreNumber: "STORE_NUMBER"
+  StoreFormat: "STORE_FORMAT_ENGLISH"
+  StoreArabicName: "STORE_NAME"
+  Sum of Total_NetSale: "Sales Amount"
+  Sum of Total_Quantity: "Sales Quantity"
+
