@@ -85,26 +85,35 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
         log_pipeline_run(db_path, "Othaim", year, month_label, "failed", error_msg=err)
         return
     
-    # ----- 5. Remove Grand Total -----
+    # ----- 5. Strip column name whitespace -----
+    df.columns = df.columns.str.strip()
+
+    # ----- 6. Drop rows with missing SKU -----
+    df = df.dropna(subset=["ItemID"])
+
+    # ----- 7. Remove Grand Total -----
     df = _remove_grand_total(df)
 
-    # ----- 6. Rename columns -----
+    # ----- 8. Rename columns -----
     df = df.rename(columns=config["rename_map"])
 
-    # ----- 7. Extract grammage -----
-    df = extract_grammage(df, source_column="SKU_DESCRIPTION", retailer="Othaim")
+    # ----- 9. Extract grammage -----
+    df = extract_grammage(df, source_column="SKU Description", retailer="Othaim")
 
-    # ----- 8. Select output columns -----
-    df = df[["STORE_FORMAT_ENGLISH","STORE_NAME","STORE_NUMBER","D2_DEPARTMENT_NAME","D3_SUB_DEPARTMENT_NAME","D4_CLASS_NAME","D5_SUB_CLASS_NAME","SKU","SKU_DESCRIPTION","VENDOR_NAME_WITH_NUMBER","Sales Quantity","Sales Amount","SizeDesc"]]
+    # ----- 10. Add month column -----
+    df["Month"] = f"{month_label}-{str(year)[-2:]}"
 
-    # ----- 9. Write Parquet -----
+    # ----- 11. Select output columns -----
+    df = df[["Month","StoreType","Store Num","Store Name","D2_DEPARTMENT_NAME","D3_SUB_DEPARTMENT_NAME","D4_CLASS_NAME","D5_SUB_CLASS_NAME","SKU","SKU Description","VENDOR_NAME_WITH_NUMBER","Sales Quantity","Sales Amount","SizeDesc"]]
+
+    # ----- 12. Write Parquet -----
     silver_dir.mkdir(parents=True, exist_ok=True)
     output_path = silver_dir / f"{month_label}_{year}.parquet"
     write_parquet(df, str(output_path))
 
     print(f"[DONE] {len(df)} rows → {output_path}")
 
-    # ----- 10. Log success -----
+    # ----- 13. Log success -----
     log_pipeline_run(db_path, "Othaim", year, month_label, "success",
                      rows=len(df), file_path=file_path)
 

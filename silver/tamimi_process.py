@@ -117,42 +117,51 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
         log_pipeline_run(db_path, "Tamimi", year, month_label, "failed", error_msg=err)
         return
 
-    # 4. Strip whitespace
+    # 4. Strip column name whitespace
+    df.columns = df.columns.str.strip()
+
+    # 5. Drop rows with missing SKU
+    df = df.dropna(subset=["Product ID"])
+
+    # 6. Strip whitespace
     df = _strip_whitespace(df)
 
-    # 5. Merge Units/Volume into Sales Qty
+    # 7. Merge Units/Volume into Sales Qty
     df = _merge_sales_qty(df)
 
-    # 6. Clean store names
+    # 8. Clean store names
     df = _clean_store(df)
 
-    # 7. Clean product names
+    # 9. Clean product names
     df = _clean_product(df)
 
-    # 8. Clean product IDs
+    # 10. Clean product IDs
     df = _clean_product_id(df)
 
-    # 9. Split composite columns
+    # 11. Split composite columns
     df = _split_composite_columns(df)
 
-    # 10. Rename columns
+    # 12. Rename columns
     df = df.rename(columns=config["rename_map"])
 
-    # 11. Extract grammage
+    # 13. Extract grammage
     df = extract_grammage(df, source_column="SKU_DESCRIPTION", retailer="Tamimi")
 
-    # 12. Select output columns
-    df = df[['STORE_DESCRIPTION','CATEGORY_CODE','CATEGORY_NAME','SKU','SKU_DESCRIPTION','BRAND_CODE','BRAND_NAME','Sales_Quantity','SALES_UNIT','Sales_Amount','SizeDesc']]
+    # 14. Add month column
+    df["Month"] = f"{month_label}-{str(year)[-2:]}"
+
+    # 15. Select output columns
+    df = df[['Month','Store Description','CATEGORY_CODE','CATEGORY_NAME','SKU','SKU Description','BRAND_CODE','BRAND_NAME','Sales_Quantity','Sales Unit','Sales_Amount','SizeDesc']]
 
 
-    # 13. Write Parquet
+    # 16. Write Parquet
     silver_dir.mkdir(parents=True, exist_ok=True)
     output_path = silver_dir / f"{month_label}_{year}.parquet"
     write_parquet(df, str(output_path))
 
     print(f"[DONE] {len(df)} rows → {output_path}")
 
-    # 14. Log success
+    # 17. Log success
     log_pipeline_run(db_path, "Tamimi", year, month_label, "success",
                      rows=len(df), file_path=file_path)
 

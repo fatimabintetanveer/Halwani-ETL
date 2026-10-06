@@ -13,9 +13,9 @@ essential_columns:
   - Volume
 
 rename_map:
-  Store: "STORE_DESCRIPTION"
+  Store: "Store Description"
   Product ID: "SKU"
-  Product: "SKU_DESCRIPTION"
-  Selling_Unit: "SALES_UNIT"
+  Product: "SKU Description"
+  Selling_Unit: "Sales Unit"
   Sales Exc Tax: "Sales_Amount"
   Sales Qty: "Sales_Quantity"
