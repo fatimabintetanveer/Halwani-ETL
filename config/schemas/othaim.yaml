@@ -4,6 +4,10 @@ essential_columns:
   - ItemID
   - ItemEnglishDescriptionWithNumber
   - StoreNumber
+  - D2_DepartmentName
+  - D3_SubDepartmentName
+  - D4_ClassName
+  - D5_SubClassName
   - Sum of Total_NetSale
   - Sum of Total_Quantity
 
