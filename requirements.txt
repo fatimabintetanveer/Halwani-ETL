@@ -1,0 +1,8 @@
+pandas>=2.0
+polars>=1.0
+pyyaml>=6.0
+openpyxl>=3.0
+pyxlsb>=1.0
+python-calamine>=0.2
+duckdb>=1.0
+pyarrow>=14.0
