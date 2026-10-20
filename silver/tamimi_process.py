@@ -1,96 +1,17 @@
 import sys
-import re
 from pathlib import Path
 import pandas as pd
 import yaml
 
-# Add project root to path so utils imports work
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.io import find_file, write_parquet, log_pipeline_run, discover_files
+from utils.io import find_file, write_parquet, log_pipeline_run, discover_files, extract_year_month
 from utils.schema_validator import validate_columns
 from utils.grammage import extract_grammage
 
 
-# ---------------------------------------------------------------------------
-# Tamimi-specific cleaning functions
-# ---------------------------------------------------------------------------
-
-def _strip_whitespace(df: pd.DataFrame) -> pd.DataFrame:
-    """Remove leading/trailing whitespace from key text columns."""
-    cols = ["Store", "Product", "Product ID", "H1:Category", "Brand"]
-    for col in cols:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-    return df
-
-
-def _merge_sales_qty(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    KG items use Volume; unit items (EA, PAK, CS, ZM) use Units.
-    Creates a single 'Sales Qty' column.
-    """
-    df["Sales Qty"] = df.apply(
-        lambda row: row["Volume"]
-        if str(row["Selling_Unit"]).strip().upper() == "KG"
-        else row["Units"],
-        axis=1,
-    )
-    return df
-
-
-def _clean_store(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    "S101 - CORNICHE AL-KHOBAR [S101]"  →  "S101 - CORNICHE AL-KHOBAR"
-    Also removes any trailing comma (some store names have stray commas).
-    """
-    df["Store"] = df["Store"].str.replace(r"\s\[\w+\]$", "", regex=True)
-    df["Store"] = df["Store"].str.rstrip(",").str.strip()
-    return df
-
-
-def _clean_product(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    "HALWANI SMOKED TURKEY BREAST 1kgs KG /1 [119231_KG]"
-     → "HALWANI SMOKED TURKEY BREAST 1kgs"
-    """
-    df["Product"] = df["Product"].str.replace(
-        r"\s[A-Z]{2,3}\s/[\d]+\s\[\d+_[A-Z]{2,3}\]$", "", regex=True
-    )
-    return df
-
-
-def _clean_product_id(df: pd.DataFrame) -> pd.DataFrame:
-    """ "119231_KG" → "119231" """
-    df["Product ID"] = df["Product ID"].str.split("_").str[0]
-    return df
-
-
-def _split_composite_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    "5125 - COLD MEAT"     →  CATEGORY_CODE="5125",  CATEGORY_NAME="COLD MEAT"
-    "04308 - HALWANI BROS" →  BRAND_CODE="04308",    BRAND_NAME="HALWANI BROS"
-    """
-    if "H1:Category" in df.columns:
-        split = df["H1:Category"].str.split(" - ", n=1, expand=True)
-        df["CATEGORY_CODE"] = split[0].str.strip()
-        df["CATEGORY_NAME"] = split[1].str.strip()
-        df = df.drop(columns=["H1:Category"])
-
-    if "Brand" in df.columns:
-        split = df["Brand"].str.split(" - ", n=1, expand=True)
-        df["BRAND_CODE"] = split[0].str.strip()
-        df["BRAND_NAME"] = split[1].str.strip()
-
-    return df
-
-
-# ---------------------------------------------------------------------------
-# Main pipeline
-# ---------------------------------------------------------------------------
-
 def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
-    """Process one Tamimi file for a given year and month."""
+
     settings = yaml.safe_load(open(settings_path))
     config = yaml.safe_load(open(f"{config_path}/tamimi.yaml"))
     source_dir = Path(settings["source"]["tamimi"]) / str(year)
@@ -110,7 +31,7 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 2. Read raw
     df = pd.read_excel(file_path)
 
-    # 3. Validate
+    # 3. Validate essential columns
     ok, err = validate_columns(df, config["essential_columns"], file_path)
     if not ok:
         print(f"[FAIL] {err}")
@@ -123,29 +44,48 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 5. Drop rows with missing SKU
     df = df.dropna(subset=["Product ID"])
 
-    # 6. Strip whitespace
-    df = _strip_whitespace(df)
+    # 6. Strip whitespace from text columns
+    for col in ["Store", "Product", "Product ID", "H1:Category", "Brand"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
 
-    # 7. Merge Units/Volume into Sales Qty
-    df = _merge_sales_qty(df)
+    # 7. Merge Units/Volume into Sales Qty (KG items use Volume, others use Units)
+    df["Sales Qty"] = df.apply(
+        lambda row: row["Volume"]
+        if str(row["Selling_Unit"]).strip().upper() == "KG"
+        else row["Units"],
+        axis=1,
+    )
 
-    # 8. Clean store names
-    df = _clean_store(df)
+    # 8. Clean store names: strip trailing "[S101]" code and commas
+    df["Store"] = df["Store"].str.replace(r"\s\[\w+\]$", "", regex=True)
+    df["Store"] = df["Store"].str.rstrip(",").str.strip()
 
-    # 9. Clean product names
-    df = _clean_product(df)
+    # 9. Clean product names: strip trailing "KG /1 [119231_KG]" SKU code
+    df["Product"] = df["Product"].str.replace(
+        r"\s[A-Z]{2,3}\s/[\d]+\s\[\d+_[A-Z]{2,3}\]$", "", regex=True
+    )
 
-    # 10. Clean product IDs
-    df = _clean_product_id(df)
+    # 10. Clean product IDs: "119231_KG" → "119231"
+    df["Product ID"] = df["Product ID"].str.split("_").str[0]
 
-    # 11. Split composite columns
-    df = _split_composite_columns(df)
+    # 11. Split composite columns: "5125 - COLD MEAT" → code + name
+    if "H1:Category" in df.columns:
+        split = df["H1:Category"].str.split(" - ", n=1, expand=True)
+        df["CATEGORY_CODE"] = split[0].str.strip()
+        df["CATEGORY_NAME"] = split[1].str.strip()
+        df = df.drop(columns=["H1:Category"])
 
-    # 12. Rename columns
+    if "Brand" in df.columns:
+        split = df["Brand"].str.split(" - ", n=1, expand=True)
+        df["BRAND_CODE"] = split[0].str.strip()
+        df["BRAND_NAME"] = split[1].str.strip()
+
+    # 12. Extract grammage (before rename, column is still "Product")
+    df = extract_grammage(df, source_column="Product", retailer="Tamimi")
+
+    # 13. Rename columns
     df = df.rename(columns=config["rename_map"])
-
-    # 13. Extract grammage
-    df = extract_grammage(df, source_column="SKU_DESCRIPTION", retailer="Tamimi")
 
     # 14. Add month column
     df["Month"] = f"{month_label}-{str(year)[-2:]}"
@@ -153,10 +93,9 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 15. Select output columns
     df = df[['Month','Store Description','CATEGORY_CODE','CATEGORY_NAME','SKU','SKU Description','BRAND_CODE','BRAND_NAME','Sales_Quantity','Sales Unit','Sales_Amount','SizeDesc']]
 
-
     # 16. Write Parquet
     silver_dir.mkdir(parents=True, exist_ok=True)
-    output_path = silver_dir / f"{month_label}_{year}.parquet"
+    output_path = silver_dir / str(year) / f"{month_label}-{year}.parquet"
     write_parquet(df, str(output_path))
 
     print(f"[DONE] {len(df)} rows → {output_path}")
@@ -186,10 +125,10 @@ if __name__ == "__main__":
             print(f"  {year} - {month}")
             process(year, month, args.config, args.settings)
     elif args.year and not args.month:
-        # All months in a specific year
         settings = yaml.safe_load(open(args.settings))
         source_dir = Path(settings["source"]["tamimi"]) / str(args.year)
-        files = discover_files(str(source_dir), extensions=(".xlsx",))
+        files = [(str(f), args.year, extract_year_month(str(f))[1])
+                 for f in source_dir.glob("*.xlsx") if not f.name.startswith("~$")]
         print(f"Processing Tamimi {args.year}: found {len(files)} file(s)")
         for file_path, year, month in files:
             print(f"  {month}")

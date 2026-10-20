@@ -21,7 +21,7 @@ rename_map:
   D2_DepartmentName: "D2_DEPARTMENT_NAME"
   StoreNumber: "Store Num"
   StoreFormat: "StoreType"
-  StoreArabicName: "STORE_NAME"
+  StoreArabicName: "STORE_NAME_ARABIC"
   Sum of Total_NetSale: "Sales Amount"
   Sum of Total_Quantity: "Sales Quantity"
 

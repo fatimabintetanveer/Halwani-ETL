@@ -1,0 +1,24 @@
+retailer: Panda
+
+essential_columns:
+  - Sku
+  - SizeDesc
+  - Month
+  - Qty TY
+  - Sales TY With VAT
+  - Store Num
+  - Store Name
+  - StoreType
+  - City
+  - Region
+  - Promo Week
+  - Promo Offer Code
+
+rename_map:
+  Sku: "SKU"
+  Sales TY With VAT: "Sales Amount"
+  Qty TY: "Sales Quantity"
+
+
+
+

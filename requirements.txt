@@ -6,3 +6,4 @@ pyxlsb>=1.0
 python-calamine>=0.2
 duckdb>=1.0
 pyarrow>=14.0
+dbt-duckdb>=1.11

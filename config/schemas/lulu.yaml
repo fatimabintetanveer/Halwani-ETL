@@ -1,0 +1,24 @@
+retailer: Lulu
+
+essential_columns:
+  - Material
+  - Product Name
+  - Qty Sold (B.Un)
+  - Sales Value
+  - Calendar Year/Month
+  - Store Num
+  - Store Name
+  - Material Group
+  - Material Group Name
+  - EAN/UPC
+  - Brand
+
+rename_map:
+  Material: "SKU"
+  Product Name: "Description"
+  Material Group Name: "Sub-Department"
+  Sales Value: "Sales Amount"
+  Qty Sold (B.Un): "Sales Quantity"
+  
+
+

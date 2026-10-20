@@ -1,0 +1,6 @@
+halwani_mdm:
+  outputs:
+    dev:
+      type: duckdb
+      path: 'D:\Halwani\Halwani-ETL\data\halwani_warehouse.db'
+  target: dev

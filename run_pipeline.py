@@ -8,12 +8,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from silver.othaim_process import process as othaim_process
 from silver.tamimi_process import process as tamimi_process
+from silver.panda_process import process as panda_process
+from silver.lulu_process import process as lulu_process
 from utils.io import discover_files
+from utils.views import refresh_silver_views
 
 # Registry: retailer name → process function
 ADAPTERS = {
     "Othaim": othaim_process,
     "Tamimi": tamimi_process,
+    "Panda": panda_process,
+    "Lulu": lulu_process,
 }
 
 
@@ -52,6 +57,10 @@ def main() -> None:
         process_fn(args.year, args.month, args.config, args.settings)
     else:
         parser.error("Use --all, --year only, or both --year and --month")
+
+    # Refresh DuckDB views for the processed retailer
+    settings = yaml.safe_load(open(args.settings))
+    refresh_silver_views(settings["duckdb"]["path"], settings["output"]["silver"], args.retailer)
 
 
 if __name__ == "__main__":

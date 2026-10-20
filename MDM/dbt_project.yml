@@ -1,0 +1,13 @@
+name: 'halwani_mdm'
+version: '1.0'
+
+profile: 'halwani_mdm'
+
+model-paths: ["models"]
+
+vars:
+  mapping_path: 'G:/Shared drives/WeCrunch Projects/Halwani/Halwani Refersh ETLs/Consolidated Mapping Halwani Bros (Grammage).xlsx'
+
+models:
+  halwani_mdm:
+    +materialized: table

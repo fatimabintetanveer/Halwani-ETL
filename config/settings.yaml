@@ -3,8 +3,7 @@ source:
   othaim: "G:/Shared drives/WeCrunch Projects/Halwani/Halwani Refersh ETLs/Raw Data/Othaim/Data"
   tamimi: "G:/Shared drives/WeCrunch Projects/Halwani/Halwani Refersh ETLs/Raw Data/Tamimi"
   panda:  "G:/Shared drives/WeCrunch Projects/Halwani/Halwani Refersh ETLs/Raw Data/Panda"
-  lulu:   "G:/Shared drives/WeCrunch Projects/Halwani/Halwani Refersh ETLs/Raw Data/Lulu/2026/Data"
-  tamimi: "G:/Shared drives/WeCrunch Projects/Halwani/Halwani Refersh ETLs/Raw Data/Tamimi"
+  lulu:   "G:/Shared drives/WeCrunch Projects/Halwani/Halwani Refersh ETLs/Raw Data/Lulu"
 
 output:
   silver: "data/silver"

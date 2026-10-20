@@ -1,5 +1,3 @@
-import os
-import time
 import duckdb
 import polars as pl
 import pandas as pd

@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: silver
+    schema: main
+    tables:
+      - name: silver_othaim
+      - name: silver_tamimi
+      - name: silver_panda
+      - name: silver_lulu
