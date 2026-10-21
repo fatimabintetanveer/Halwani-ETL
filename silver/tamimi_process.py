@@ -91,7 +91,7 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     df["Month"] = f"{month_label}-{str(year)[-2:]}"
 
     # 15. Select output columns
-    df = df[['Month','Store Description','CATEGORY_CODE','CATEGORY_NAME','SKU','SKU Description','BRAND_CODE','BRAND_NAME','Sales_Quantity','Sales Unit','Sales_Amount','SizeDesc']]
+    df = df[['Month','Store Description','CATEGORY_CODE','CATEGORY_NAME','SKU','SKU Description','BRAND_CODE','BRAND_NAME','Sales Quantity','Sales Unit','Sales Amount','SizeDesc']]
 
     # 16. Write Parquet
     silver_dir.mkdir(parents=True, exist_ok=True)

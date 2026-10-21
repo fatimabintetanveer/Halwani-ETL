@@ -17,5 +17,5 @@ rename_map:
   Product ID: "SKU"
   Product: "SKU Description"
   Selling_Unit: "Sales Unit"
-  Sales Exc Tax: "Sales_Amount"
-  Sales Qty: "Sales_Quantity"
+  Sales Exc Tax: "Sales Amount"
+  Sales Qty: "Sales Quantity"

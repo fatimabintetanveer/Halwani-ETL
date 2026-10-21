@@ -111,7 +111,7 @@ def write_parquet(df: pl.DataFrame | pd.DataFrame, output_path: str) -> str:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     if isinstance(df, pd.DataFrame):
-        df.to_parquet(str(out))
+        df.to_parquet(str(out), index=False)
     elif isinstance(df, pl.DataFrame):
         df.write_parquet(str(out))
 

@@ -6,4 +6,4 @@ FROM read_xlsx(
     header=true,
     all_varchar=true
 )
-WHERE Key IS NOT NULL
+WHERE Key IS NOT NULL AND Key != '0'

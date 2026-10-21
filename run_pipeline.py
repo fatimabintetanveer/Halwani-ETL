@@ -10,7 +10,7 @@ from silver.othaim_process import process as othaim_process
 from silver.tamimi_process import process as tamimi_process
 from silver.panda_process import process as panda_process
 from silver.lulu_process import process as lulu_process
-from utils.io import discover_files
+from utils.io import discover_files, extract_year_month
 from utils.views import refresh_silver_views
 
 # Registry: retailer name → process function
@@ -47,7 +47,9 @@ def main() -> None:
     elif args.year and not args.month:
         settings = yaml.safe_load(open(args.settings))
         source_dir = Path(settings["source"][retailer_key]) / str(args.year)
-        files = discover_files(str(source_dir), extensions=(".xlsb", ".xlsx", ".csv"))
+        files = [(str(f), args.year, extract_year_month(str(f))[1])
+                 for f in source_dir.glob("*.*")
+                 if not f.name.startswith("~$")]
         print(f"Processing {args.retailer} {args.year}: found {len(files)} file(s)")
         for file_path, year, month in files:
             print(f"  {month}")

@@ -33,6 +33,7 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 2. Read raw
     df = pl.read_csv(
         file_path,
+        low_memory=False,       # use more RAM, fewer passes
         schema_overrides={
             "Sku": pl.Utf8,
             "BARCODE": pl.Utf8,

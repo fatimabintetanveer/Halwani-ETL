@@ -26,10 +26,8 @@ def refresh_silver_views(db_path: str, silver_dir: str, retailer: str = None) ->
 
         parts = []
         for f in parquet_files:
-            year = f.parent.name
-            month = f.stem.split("-")[0]
             abs_path = str(f).replace("\\", "/")
-            parts.append(f"SELECT *, '{month}' AS month, {year} AS year FROM '{abs_path}'")
+            parts.append(f"SELECT * FROM '{abs_path}'")
 
         sql = f"CREATE OR REPLACE VIEW {view_name} AS " + "\nUNION ALL\n".join(parts)
         con.execute(sql)
