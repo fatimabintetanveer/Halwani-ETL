@@ -26,47 +26,17 @@ def refresh_silver_views(db_path: str, silver_dir: str, retailer: str = None) ->
 
         parts = []
         for f in parquet_files:
+            year = f.parent.name
+            month = f.stem.split("-")[0]
             abs_path = str(f).replace("\\", "/")
-            parts.append(f"SELECT * FROM '{abs_path}'")
+            parts.append(f"SELECT *, '{month}' AS month, {year} AS year FROM '{abs_path}'")
 
         sql = f"CREATE OR REPLACE VIEW {view_name} AS " + "\nUNION ALL\n".join(parts)
         con.execute(sql)
         print(f"[VIEW] {view_name} → {len(parts)} months")
 
-    # Build unified table with a Retailer column
-    columns = set()
-    retailer_views = ['silver_othaim', 'silver_tamimi', 'silver_lulu', 'silver_panda']
-
-    # Step 1: collect all unique column names across all 4 views
-    for view in retailer_views:
-        try:
-            cols = con.execute(f"SELECT * FROM {view} LIMIT 0").description
-            columns.update([c[0] for c in cols])
-        except Exception:
-            continue
-
-    # Step 2: build UNION query with NULL for missing columns
-    parts = []
-    for view in retailer_views:
-        try:
-            view_cols = [c[0] for c in con.execute(f"SELECT * FROM {view} LIMIT 0").description]
-        except Exception:
-            continue
-        retailer_name = view.replace('silver_', '').title()
-        selects = []
-        for col in sorted(columns):
-            if col in view_cols:
-                selects.append(f'"{col}"')
-            else:
-                selects.append(f'NULL AS "{col}"')
-        parts.append(f"SELECT '{retailer_name}' AS Retailer, {', '.join(selects)} FROM {view}")
-
-    if parts:
-        sql = "CREATE OR REPLACE TABLE silver_unified AS " + "\nUNION ALL\n".join(parts)
-        con.execute(sql)
-        print(f"[TABLE] silver_unified → {len(parts)} retailers, {len(columns)} columns")
-
     con.close()
+
 
 
 if __name__ == "__main__":
