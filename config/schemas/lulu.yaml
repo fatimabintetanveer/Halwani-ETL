@@ -15,7 +15,7 @@ essential_columns:
 
 rename_map:
   Material: "SKU"
-  Product Name: "Description"
+  Product Name: "SKU Description"
   Material Group Name: "Sub-Department"
   Sales Value: "Sales Amount"
   Qty Sold (B.Un): "Sales Quantity"

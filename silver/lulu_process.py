@@ -127,13 +127,22 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 20. Rename columns
     df = df.rename(columns=config["rename_map"])
 
-    # 21. Add month column
+    # 21. Build Key column (SKU + SizeDesc)
+    df["Key"] = df.apply(
+        lambda row: "Lulu" + str(row["SKU"]) + ("-" + str(row["SizeDesc"]) if row["SizeDesc"] else ""),
+        axis=1
+    )
+
+    # 22. Add Retailer column
+    df["Retailer"] = "Lulu"
+
+    # 23. Add month column
     df["Month"] = f"{month_label}-{str(year)[-2:]}"
 
-    # 22. Select output columns
-    df = df[["Month", "SKU", "Description", "Sub-Department", "Material Group", "SizeDesc", "Store Num", "Store Name", "Sales Quantity", "Sales Amount"]]
+    # 24. Select output columns
+    df = df[["Retailer","Key","Month", "SKU", "SKU Description", "Sub-Department", "Material Group", "SizeDesc", "Store Num", "Store Name", "Sales Quantity", "Sales Amount"]]
 
-    # 23. Write Parquet
+    # 25. Write Parquet
     silver_dir.mkdir(parents=True, exist_ok=True)
     output_path = silver_dir / str(year) / f"{month_label}-{year}.parquet"
     write_parquet(df, str(output_path))
@@ -141,7 +150,7 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     print(f"[DONE] {len(df)} rows → {output_path}")
     print(f"Time: {time.time() - t0:.1f}s")
 
-    # 24. Log success
+    # 26. Log success
     log_pipeline_run(db_path, "Lulu", year, month_label, "success",
                      rows=len(df), file_path=file_path)
 

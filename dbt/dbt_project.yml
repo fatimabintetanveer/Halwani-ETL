@@ -13,3 +13,6 @@ vars:
 models:
   halwani_mdm:
     +materialized: table
+    gold:
+      +schema: gold
+      +materialized: table

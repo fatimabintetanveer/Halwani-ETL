@@ -63,23 +63,32 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 9. Extract grammage 
     df = extract_grammage(df, source_column="ItemEnglishDescriptionWithNumber", retailer="Othaim")
 
-    # 10. Rename columns
+    # 10. Build Key column
+    df["Key"] = df.apply(
+        lambda row: "Othaim" + str(row["ItemID"]) + ("-" + str(row["SizeDesc"]) if row["SizeDesc"] else ""),
+        axis=1
+    )
+
+    # 11. Rename columns
     df = df.rename(columns=config["rename_map"])
 
-    # 11. Add month column
+    # 12. Add Retailer column
+    df["Retailer"] = "Othaim"
+
+    # 13. Add month column
     df["Month"] = f"{month_label}-{str(year)[-2:]}"
 
-    # 12. Select output columns
-    df = df[["Month","StoreType","Store Num","STORE_NAME_ARABIC","D2_DEPARTMENT_NAME","D3_SUB_DEPARTMENT_NAME","D4_CLASS_NAME","D5_SUB_CLASS_NAME","SKU","SKU Description","VENDOR_NAME_WITH_NUMBER","Sales Quantity","Sales Amount","SizeDesc"]]
+    # 14. Select output columns
+    df = df[["Retailer","Key","Month","StoreType","Store Num","STORE_NAME_ARABIC","D2_DEPARTMENT_NAME","D3_SUB_DEPARTMENT_NAME","D4_CLASS_NAME","D5_SUB_CLASS_NAME","SKU","SKU Description","VENDOR_NAME_WITH_NUMBER","Sales Quantity","Sales Amount","SizeDesc"]]
 
-    # 13. Write Parquet
+    # 15. Write Parquet
     silver_dir.mkdir(parents=True, exist_ok=True)
     output_path = silver_dir / str(year) / f"{month_label}-{year}.parquet"
     write_parquet(df, str(output_path))
 
     print(f"[DONE] {len(df)} rows → {output_path}")
 
-    # 14. Log success
+    # 16. Log success
     log_pipeline_run(db_path, "Othaim", year, month_label, "success",
                      rows=len(df), file_path=file_path)
 

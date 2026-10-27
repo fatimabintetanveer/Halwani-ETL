@@ -11,7 +11,7 @@ from silver.tamimi_process import process as tamimi_process
 from silver.panda_process import process as panda_process
 from silver.lulu_process import process as lulu_process
 from utils.io import discover_files, extract_year_month
-from utils.views import refresh_silver_views
+from utils.views import refresh_silver_views, build_unified_silver
 
 # Registry: retailer name → process function
 ADAPTERS = {
@@ -63,6 +63,7 @@ def main() -> None:
     # Refresh DuckDB views for the processed retailer
     settings = yaml.safe_load(open(args.settings))
     refresh_silver_views(settings["duckdb"]["path"], settings["output"]["silver"], args.retailer)
+    build_unified_silver(settings["duckdb"]["path"])
 
 
 if __name__ == "__main__":

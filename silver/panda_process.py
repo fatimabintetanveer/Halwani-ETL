@@ -62,27 +62,48 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
         if col in df.columns:
             df = df.with_columns(pl.col(col).str.strip_chars())
 
+    # 6b. Normalize Store Name: remove dots, collapse spaces
+    if "Store Name" in df.columns:
+        df = df.with_columns(
+            pl.col("Store Name")
+            .str.replace_all(r"\.", " ")
+            .str.replace_all(r"\s+", " ")
+            .str.strip_chars()
+        )
+
     # 7. Rename columns
     rename_map = config["rename_map"]
     df = df.rename({k: v for k, v in rename_map.items() if k in df.columns})
 
-    # 8. Add month column + drop old Month
+    # 8. Build Key column (SKU + SizeDesc)
+    df = df.with_columns(
+        pl.concat_str(
+            pl.lit("Panda"),
+            pl.col("SKU"),
+            pl.when(pl.col("SizeDesc").is_not_null() & (pl.col("SizeDesc") != ""))
+            .then(pl.lit("-") + pl.col("SizeDesc"))
+            .otherwise(pl.lit(""))
+        ).alias("Key")
+    )
+
+    # 9. Add Retailer column + month column + drop old Month
+    df = df.with_columns(pl.lit("Panda").alias("Retailer"))
     df = df.drop("Month") if "Month" in df.columns else df
     df = df.with_columns(pl.lit(f"{month_label}-{str(year)[-2:]}").alias("Month"))
 
-    # 9. Select output columns
-    df = df[["Month", "SKU", "SizeDesc", "Store Num", "Store Name", "StoreType",
+    # 10. Select output columns
+    df = df[["Retailer","Key","Month", "SKU", "SizeDesc", "Store Num", "Store Name", "StoreType",
              "City", "Region", "Promo Week", "Promo Offer Code",
              "Sales Quantity", "Sales Amount"]]
 
-    # 10. Write Parquet
+    # 12. Write Parquet
     silver_dir.mkdir(parents=True, exist_ok=True)
     output_path = silver_dir / str(year) / f"{month_label}-{year}.parquet"
     write_parquet(df, str(output_path))
 
     print(f"[DONE] {len(df)} rows → {output_path}")
 
-    # 11. Log success
+    # 12. Log success
     log_pipeline_run(db_path, "Panda", year, month_label, "success",
                      rows=len(df), file_path=file_path)
 

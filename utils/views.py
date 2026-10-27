@@ -6,7 +6,6 @@ def refresh_silver_views(db_path: str, silver_dir: str, retailer: str = None) ->
     """
     Build one DuckDB view per retailer that UNIONs all month Parquet files.
     If retailer is given, only refresh that one retailer's view.
-    Run this after Silver adapters finish to refresh the views.
     """
     con = duckdb.connect(db_path)
     base = Path(silver_dir).resolve()
@@ -26,10 +25,8 @@ def refresh_silver_views(db_path: str, silver_dir: str, retailer: str = None) ->
 
         parts = []
         for f in parquet_files:
-            year = f.parent.name
-            month = f.stem.split("-")[0]
             abs_path = str(f).replace("\\", "/")
-            parts.append(f"SELECT *, '{month}' AS month, {year} AS year FROM '{abs_path}'")
+            parts.append(f"SELECT * FROM '{abs_path}'")
 
         sql = f"CREATE OR REPLACE VIEW {view_name} AS " + "\nUNION ALL\n".join(parts)
         con.execute(sql)
@@ -38,12 +35,60 @@ def refresh_silver_views(db_path: str, silver_dir: str, retailer: str = None) ->
     con.close()
 
 
+def build_unified_silver(db_path: str) -> None:
+    """
+    Build a single unified silver VIEW by UNION-ing all retailer views.
+    Adds a Retailer column. Missing columns become NULL per retailer.
+    """
+    con = duckdb.connect(db_path)
+    columns = set()
+    retailer_views = ["silver_othaim", "silver_tamimi", "silver_lulu", "silver_panda"]
+
+    # Collect all unique column names across all 4 views
+    for view in retailer_views:
+        try:
+            cols = con.execute(f"SELECT * FROM {view} LIMIT 0").description
+            columns.update([c[0] for c in cols])
+        except Exception:
+            continue
+
+    # Build UNION query with NULL for missing columns
+    parts = []
+    for view in retailer_views:
+        try:
+            view_cols = [c[0] for c in con.execute(f"SELECT * FROM {view} LIMIT 0").description]
+        except Exception:
+            continue
+
+        selects = []
+        for col in sorted(columns):
+            if col in view_cols:
+                selects.append(f'"{col}"')
+            else:
+                selects.append(f'NULL AS "{col}"')
+        parts.append(f"SELECT {', '.join(selects)} FROM {view}")
+
+    if parts:
+        sql = "CREATE OR REPLACE VIEW silver_unified AS " + "\nUNION ALL\n".join(parts)
+        con.execute(sql)
+        print(f"[VIEW] silver_unified → {len(parts)} retailers, {len(columns)} columns")
+
+    con.close()
+
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", default="data/halwani_warehouse.db")
     parser.add_argument("--silver", default="data/silver")
-    parser.add_argument("--retailer", default=None, help="Only refresh one retailer")
+    parser.add_argument("--retailer", default=None, help="Only refresh one retailer's view")
+    parser.add_argument("--unified", action="store_true", help="Build the unified silver table")
     args = parser.parse_args()
-    refresh_silver_views(args.db, args.silver, args.retailer)
+
+    if args.retailer:
+        refresh_silver_views(args.db, args.silver, args.retailer)
+    elif args.unified:
+        build_unified_silver(args.db)
+    else:
+        refresh_silver_views(args.db, args.silver)
+        build_unified_silver(args.db)

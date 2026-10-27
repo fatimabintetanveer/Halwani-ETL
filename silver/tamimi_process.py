@@ -87,20 +87,29 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 13. Rename columns
     df = df.rename(columns=config["rename_map"])
 
-    # 14. Add month column
+    # 14. Build Key column (SKU + Sales Unit + SizeDesc)
+    df["Key"] = df.apply(
+        lambda row: "Tamimi" + str(row["SKU"]) + str(row["Sales Unit"]) + ("-" + str(row["SizeDesc"]) if row["SizeDesc"] else ""),
+        axis=1
+    )
+
+    # 15. Add Retailer column
+    df["Retailer"] = "Tamimi"
+
+    # 16. Add month column
     df["Month"] = f"{month_label}-{str(year)[-2:]}"
 
-    # 15. Select output columns
-    df = df[['Month','Store Description','CATEGORY_CODE','CATEGORY_NAME','SKU','SKU Description','BRAND_CODE','BRAND_NAME','Sales Quantity','Sales Unit','Sales Amount','SizeDesc']]
+    # 17. Select output columns
+    df = df[['Retailer','Key','Month','Store Description','CATEGORY_CODE','CATEGORY_NAME','SKU','SKU Description','BRAND_CODE','BRAND_NAME','Sales Quantity','Sales Unit','Sales Amount','SizeDesc']]
 
-    # 16. Write Parquet
+    # 18. Write Parquet
     silver_dir.mkdir(parents=True, exist_ok=True)
     output_path = silver_dir / str(year) / f"{month_label}-{year}.parquet"
     write_parquet(df, str(output_path))
 
     print(f"[DONE] {len(df)} rows → {output_path}")
 
-    # 17. Log success
+    # 19. Log success
     log_pipeline_run(db_path, "Tamimi", year, month_label, "success",
                      rows=len(df), file_path=file_path)
 

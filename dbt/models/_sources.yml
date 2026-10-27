@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: silver
+    schema: main
+    tables:
+      - name: silver_unified
+      - name: silver_panda
