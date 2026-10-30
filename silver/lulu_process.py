@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
 from utils.schema_validator import validate_columns
 from utils.grammage import extract_grammage
+from utils.validation.source_files_validation import check_expected_sheet
 
 
 def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
@@ -27,6 +28,11 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
         return
 
     log_pipeline_run(db_path, "Lulu", year, month_label, "discover_file", "success")
+
+    sheet_name, error = check_expected_sheet(file_path, expected_sheets=("Sheet1",), retailer="Lulu")
+    if sheet_name is None:
+        print(f"[FAIL] {error}")
+        return
 
     print(f"[READ] {Path(file_path).name}")
 

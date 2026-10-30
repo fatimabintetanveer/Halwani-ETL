@@ -116,54 +116,84 @@ def find_duplicate_periods(
 
 def check_expected_sheet(
     file_path: str | Path,
-    expected_sheet: str,
+    *,
+    expected_sheets: tuple[str, ...],
     retailer: str = "",
     engine: str = "calamine",
-) -> tuple[bool, str | None]:
-    """Check whether an Excel workbook contains the expected worksheet.
+) -> tuple[str | None, str | None]:
+    """Return the matching sheet name, or an error message if none matches.
 
-    Returns ``(True, None)`` when the sheet exists. Otherwise returns
-    ``(False, message)`` with the workbook path and available sheet names.
-    The engine defaults to ``calamine``, matching the retailer processors.
+    Plain entries in expected_sheets are exact names. Entries prefixed with
+    're:' are regular expressions, for example r're:DayStoreProduct_\\d+'.
     """
     path = Path(file_path)
-    label = f" for {retailer}" if retailer else ""
+    retailer_label = f" for {retailer}" if retailer else ""
+
+    if not expected_sheets:
+        raise ValueError("expected_sheets must contain at least one name or pattern")
 
     try:
-        workbook = pd.ExcelFile(path, engine=engine)
-        available_sheets = workbook.sheet_names
-        workbook.close()
+        with pd.ExcelFile(path, engine=engine) as workbook:
+            available_sheets = workbook.sheet_names
     except FileNotFoundError:
-        message = f"Workbook not found{label}: {path}"
-        logger.error(message)
-        return False, message
+        message = f"Workbook not found{retailer_label}: {path}"
+        return None, message
+    
     except PermissionError:
-        message = f"Access denied while opening workbook{label}: {path}"
-        logger.error(message)
-        return False, message
+        message = f"Access denied while opening workbook{retailer_label}: {path}"
+        return None, message
+    
     except ImportError as exc:
-        message = f"Excel reader engine '{engine}' is unavailable{label}: {exc}"
-        logger.exception(message)
-        return False, message
+        message = f"Excel reader engine '{engine}' is unavailable{retailer_label}: {exc}"
+        return None, message
+    
     except Exception as exc:
         message = (
-            f"Could not inspect workbook sheets{label}: {path}; "
+            f"Could not inspect workbook{retailer_label}: {path}; "
             f"{type(exc).__name__}: {exc}"
         )
-        logger.exception(message)
-        return False, message
+        return None, message
 
-    if expected_sheet not in available_sheets:
-        message = (
-            f"Expected sheet '{expected_sheet}' is missing{label} in {path}. "
-            f"Available sheets: {available_sheets}"
+    matched_sheets = []
+
+    for expected in expected_sheets:
+        if expected.startswith("re:"):
+            pattern = expected[3:]
+
+            try:
+                compiled_pattern = re.compile(pattern, flags=re.IGNORECASE)
+            except re.error as exc:
+                raise ValueError(
+                    f"Invalid expected sheet pattern {expected!r}: {exc}"
+                ) from exc
+
+            for sheet_name in available_sheets:
+                if compiled_pattern.fullmatch(sheet_name):
+                    matched_sheets.append(sheet_name)
+
+        elif expected in available_sheets:
+            matched_sheets.append(expected)
+
+    if len(matched_sheets) == 1:
+        sheet_name = matched_sheets[0]
+        logger.info(
+            "Found expected sheet '%s'%s in %s",
+            sheet_name,
+            retailer_label,
+            path.name,
         )
-        logger.error(message)
-        return False, message
+        return sheet_name, None
 
-    logger.info(
-        "Expected sheet '%s' found%s in %s",
-        expected_sheet, label, path.name,
+    if len(matched_sheets) > 1:
+        message = (
+            f"Multiple expected sheet matches found{retailer_label} "
+            f"in {path.name}: {matched_sheets}"
+        )
+        return None, message
+
+    message = (
+        f"No expected sheet found{retailer_label} in {path.name}. "
+        f"Expected names/patterns: {expected_sheets}; "
+        f"available sheets: {available_sheets}"
     )
-    return True, None
-
+    return None, message

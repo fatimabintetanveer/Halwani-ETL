@@ -97,8 +97,8 @@ def find_file(
 
 
     if not matching_files:
-        message = f" No eligible {retailer} file found for {requested_period_key}"
-        logger.warning("%s", message)
+        message = f"[ERROR] No eligible {retailer} file found for {requested_period_key}"
+        logger.error("%s", message)
         return None, message
 
     selected_file = matching_files[0]
