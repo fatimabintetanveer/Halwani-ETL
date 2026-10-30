@@ -5,7 +5,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.io import find_file, write_parquet, log_pipeline_run, discover_files, extract_year_month
+from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
 from utils.schema_validator import validate_columns
 from utils.grammage import extract_grammage
 
@@ -19,23 +19,36 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     db_path = settings["duckdb"]["path"]
 
     # 1. Find file
-    file_path = find_file(str(source_dir), month_label, extensions=(".xlsx",), recursive=False)
+    file_path, error_message = find_file(
+        str(source_dir), month_label, year, extensions=(".xlsx",), retailer="Tamimi"
+    )
     if file_path is None:
-        print(f"[SKIP] No file found for Tamimi {year} - {month_label}")
-        log_pipeline_run(db_path, "Tamimi", year, month_label, "skipped",
-                         error_msg=f"No file found for {year} - {month_label}")
+        log_pipeline_run(
+            db_path, "Tamimi", year, month_label, "discover_file", "failed",
+            error_msg=error_message,
+        )
         return
+
+    log_pipeline_run(
+        db_path, "Tamimi", year, month_label, "discover_file", "success",
+        file_path=file_path,
+    )
 
     print(f"[READ] {file_path}")
 
     # 2. Read raw
     df = pd.read_excel(file_path)
 
+    transform_run_id = log_pipeline_run(
+        db_path, "Tamimi", year, month_label,
+        stage="silver_transform", status="running", file_path=file_path,
+    )
+
     # 3. Validate essential columns
     ok, err = validate_columns(df, config["essential_columns"], file_path)
     if not ok:
         print(f"[FAIL] {err}")
-        log_pipeline_run(db_path, "Tamimi", year, month_label, "failed", error_msg=err)
+        update_pipeline_run(db_path, transform_run_id, "failed", error_msg=err)
         return
 
     # 4. Strip column name whitespace
@@ -110,8 +123,7 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     print(f"[DONE] {len(df)} rows → {output_path}")
 
     # 19. Log success
-    log_pipeline_run(db_path, "Tamimi", year, month_label, "success",
-                     rows=len(df), file_path=file_path)
+    update_pipeline_run(db_path, transform_run_id, "success")
 
 
 if __name__ == "__main__":

@@ -4,8 +4,6 @@ version: '1.0'
 profile: 'halwani_mdm'
 
 model-paths: ["models"]
-macro-paths: ["macros"]
-
 vars:
   mapping_path: 'G:/Shared drives/WeCrunch Projects/Halwani/Halwani Refersh ETLs/Consolidated Mapping Halwani Bros (Grammage).xlsx'
   retailers: ['Othaim', 'Tamimi', 'Lulu', 'Panda']

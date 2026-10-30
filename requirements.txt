@@ -7,3 +7,4 @@ python-calamine>=0.2
 duckdb>=1.0
 pyarrow>=14.0
 dbt-duckdb>=1.11
+streamlit>=1.37
