@@ -4,10 +4,13 @@ from pathlib import Path
 import polars as pl
 import yaml
 
+
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
 from utils.schema_validator import validate_columns
+from utils.validation.layout_validation import check_layout
 
 
 def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
@@ -35,6 +38,11 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
         db_path, "Panda", year, month_label, "discover_file", "success",
         file_path=file_path,
     )
+
+    layout, layout_error = check_layout(file_path,"Panda")
+    if not layout:
+        print(f"[FAIL] {layout_error}")
+        return
 
     print(f"[READ] {Path(file_path).name}")
 

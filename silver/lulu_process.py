@@ -4,12 +4,14 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
 from utils.schema_validator import validate_columns
 from utils.grammage import extract_grammage
 from utils.validation.source_files_validation import check_expected_sheet
+from utils.validation.layout_validation import check_layout
 
 
 def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
@@ -32,6 +34,11 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     sheet_name, error = check_expected_sheet(file_path, expected_sheets=("Sheet1",), retailer="Lulu")
     if sheet_name is None:
         print(f"[FAIL] {error}")
+        return
+
+    layout, layout_error = check_layout(file_path,"Lulu",sheet_name=sheet_name)
+    if not layout:
+        print(f"[FAIL] {layout_error}")
         return
 
     print(f"[READ] {Path(file_path).name}")
