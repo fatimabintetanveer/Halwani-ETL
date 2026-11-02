@@ -75,6 +75,7 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     ok, err = validate_schema(df, retailer="Othaim", file_path=file_path)
     if not ok:
         print(f"[FAIL] {err}")
+        update_pipeline_run(db_path, transform_run_id, "failed", error_msg=err)
         return
 
     # 6. Remove Grand Total footer row

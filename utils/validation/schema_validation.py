@@ -44,14 +44,12 @@ def validate_schema(
                 validation_rules = yaml.safe_load(rules_file) or {}
         except (OSError, yaml.YAMLError) as exc:
             message = f"Could not load validation rules from {VALIDATION_RULES_PATH}: {exc}"
-            logger.error(message)
             return False, message
 
         retailer_rules = validation_rules.get(retailer_key, {})
         required_columns = retailer_rules.get("schema", {}).get("essential_columns")
         if not required_columns:
             message = f"No essential-column schema rules configured for retailer {retailer!r}"
-            logger.error(message)
             return False, message
 
     normalized_actual = [_normalize_column_name(name) for name in actual_columns]
@@ -83,7 +81,6 @@ def validate_schema(
         if missing:
             problems.append(f"missing required columns: {missing}")
         message = f"Schema validation failed{label}: {'; '.join(problems)}"
-        logger.error(message)
         return False, message
 
     logger.info("Schema validation passed%s", label)
