@@ -10,7 +10,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
-from utils.schema_validator import validate_columns
+from utils.validation.schema_validation import validate_schema
 from utils.grammage import extract_grammage
 from utils.validation.source_files_validation import check_expected_sheet
 from utils.validation.layout_validation import check_layout
@@ -18,7 +18,6 @@ from utils.validation.layout_validation import check_layout
 def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
 
     settings = yaml.safe_load(open(settings_path))
-    config = yaml.safe_load(open(f"{config_path}/othaim.yaml"))
     source_dir = Path(settings["source"]["othaim"]) / str(year)
     silver_dir = Path(settings["output"]["silver"]) / "Othaim"
     db_path = settings["duckdb"]["path"]
@@ -73,10 +72,9 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
         df = raw.iloc[1:].reset_index(drop=True)
 
     # 5. Validate essential columns
-    ok, err = validate_columns(df, config["essential_columns"], file_path)
+    ok, err = validate_schema(df, retailer="Othaim", file_path=file_path)
     if not ok:
         print(f"[FAIL] {err}")
-        update_pipeline_run(db_path, transform_run_id, "failed", error_msg=err)
         return
 
     # 6. Remove Grand Total footer row
@@ -99,7 +97,20 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     )
 
     # 11. Rename columns
-    df = df.rename(columns=config["rename_map"])
+    df = df.rename(columns={
+        "ItemID": "SKU",
+        "ItemEnglishDescriptionWithNumber": "SKU Description",
+        "VendorNameWithNumber": "VENDOR_NAME_WITH_NUMBER",
+        "D5_SubClassName": "D5_SUB_CLASS_NAME",
+        "D4_ClassName": "D4_CLASS_NAME",
+        "D3_SubDepartmentName": "D3_SUB_DEPARTMENT_NAME",
+        "D2_DepartmentName": "D2_DEPARTMENT_NAME",
+        "StoreNumber": "Store Num",
+        "StoreFormat": "StoreType",
+        "StoreArabicName": "STORE_NAME_ARABIC",
+        "Sum of Total_NetSale": "Sales Amount",
+        "Sum of Total_Quantity": "Sales Quantity",
+    })
 
     # 12. Add Retailer column
     df["Retailer"] = "Othaim"

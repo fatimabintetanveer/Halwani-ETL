@@ -9,77 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import yaml
 
 
 logger = logging.getLogger(__name__)
 
 
-LAYOUT_RULES: dict[str, dict[str, Any]] = {
-    "tamimi": {
-        "header_row": 1,
-        "first_data_row": 2,
-        "header_anchors": ("Store", "Product ID"),
-        "expected_column_count": 11,
-    },
-    "panda": {
-        "delimiter": ",",
-        "encoding": "utf-8-sig",
-        "header_row": 1,
-        "first_data_row": 2,
-        "header_anchors": (
-            "Sku",
-            "Store Num",
-            "Sales TY With VAT",
-            "Qty TY",
-        ),
-        "expected_column_count": 28,
-    },
-    "othaim": {
-        "variants": {
-            "new": {
-                "header_row": 1,
-                "first_data_row": 2,
-                "header_anchors": (
-                    "StoreFormat",
-                    "StoreNumber",
-                    "ItemID",
-                    "Sum of Total_Quantity",
-                    "Sum of Total_NetSale",
-                ),
-                "expected_column_count": 16,
-            },
-            "old": {
-                "header_row": 2,
-                "first_data_row": 3,
-                "header_anchors": (
-                    "R_WEEK_NO_IN_YEAR",
-                    "StoreNumber",
-                    "ItemID",
-                    "Sum of Total_NetSale",
-                    "Sum of Total_Quantity",
-                ),
-                "required_values_in_row": {1: ("Values",)},
-                "expected_column_count": 14,
-            },
-        },
-    },
-    "lulu": {
-        "header_rows": (1, 2, 3, 4),
-        "first_data_row": 5,
-        "fixed_cells": {
-            "H2": "Plant",
-            "A4": "Calendar Year/Month",
-            "C4": "Material Group",
-            "E4": "Material",
-            "G4": "EAN/UPC",
-            "H4": "Brand",
-        },
-        "required_values_in_row": {
-            1: ("Sales Value", "Qty Sold (B.Un)"),
-        },
-        "expected_blank_cells": ("B4", "D4", "F4"),
-    },
-}
+VALIDATION_RULES_PATH = Path(__file__).resolve().parents[2] / "config" / "validation_rules.yaml"
 
 
 def _normalize(value: Any) -> str:
@@ -123,9 +59,18 @@ def check_layout(
     """
     path = Path(file_path)
     retailer_key = retailer.strip().casefold()
-    rules = LAYOUT_RULES.get(retailer_key)
+    try:
+        with VALIDATION_RULES_PATH.open("r", encoding="utf-8") as rules_file:
+            validation_rules = yaml.safe_load(rules_file) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        message = f"Could not load layout rules from {VALIDATION_RULES_PATH}: {exc}"
+        logger.error(message)
+        return False, message
+
+    rules = validation_rules.get(retailer_key, {}).get("layout")
     if rules is None:
         message = f"No layout rules configured for retailer {retailer!r}"
+        logger.error(message)
         return False, message
 
     try:

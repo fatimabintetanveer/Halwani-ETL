@@ -10,7 +10,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
-from utils.schema_validator import validate_columns
+from utils.validation.schema_validation import validate_schema
 from utils.validation.source_files_validation import check_expected_sheet
 from utils.grammage import extract_grammage
 from utils.validation.layout_validation import check_layout
@@ -19,7 +19,6 @@ from utils.validation.layout_validation import check_layout
 def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
 
     settings = yaml.safe_load(open(settings_path))
-    config = yaml.safe_load(open(f"{config_path}/tamimi.yaml"))
     source_dir = Path(settings["source"]["tamimi"]) / str(year)
     silver_dir = Path(settings["output"]["silver"]) / "Tamimi"
     db_path = settings["duckdb"]["path"]
@@ -62,10 +61,9 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     )
 
     # 3. Validate essential columns
-    ok, err = validate_columns(df, config["essential_columns"], file_path)
+    ok, err = validate_schema(df, retailer="Tamimi", file_path=file_path)
     if not ok:
         print(f"[FAIL] {err}")
-        update_pipeline_run(db_path, transform_run_id, "failed", error_msg=err)
         return
 
     # 4. Strip column name whitespace
@@ -115,7 +113,14 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     df = extract_grammage(df, source_column="Product", retailer="Tamimi")
 
     # 13. Rename columns
-    df = df.rename(columns=config["rename_map"])
+    df = df.rename(columns={
+        "Store": "Store Description",
+        "Product ID": "SKU",
+        "Product": "SKU Description",
+        "Selling_Unit": "Sales Unit",
+        "Sales Exc Tax": "Sales Amount",
+        "Sales Qty": "Sales Quantity",
+    })
 
     # 14. Build Key column (SKU + Sales Unit + SizeDesc)
     df["Key"] = df.apply(

@@ -1,0 +1,114 @@
+lulu:
+  layout:
+    header_rows: [1, 2, 3, 4]
+    first_data_row: 5
+    fixed_cells:
+      H2: Plant
+      A4: Calendar Year/Month
+      C4: Material Group
+      E4: Material
+      G4: EAN/UPC
+      H4: Brand
+    required_values_in_row:
+      1:
+        - Sales Value
+        - Qty Sold (B.Un)
+    expected_blank_cells: [B4, D4, F4]
+  schema:
+    essential_columns:
+      - Material
+      - Product Name
+      - Qty Sold (B.Un)
+      - Sales Value
+      - Calendar Year/Month
+      - Store Num
+      - Store Name
+      - Material Group
+      - Material Group Name
+      - EAN/UPC
+      - Brand
+
+othaim:
+  layout:
+    variants:
+      new:
+        header_row: 1
+        first_data_row: 2
+        header_anchors:
+          - StoreFormat
+          - StoreNumber
+          - ItemID
+          - Sum of Total_Quantity
+          - Sum of Total_NetSale
+        expected_column_count: 16
+      old:
+        header_row: 2
+        first_data_row: 3
+        header_anchors:
+          - R_WEEK_NO_IN_YEAR
+          - StoreNumber
+          - ItemID
+          - Sum of Total_NetSale
+          - Sum of Total_Quantity
+        required_values_in_row:
+          1: [Values]
+        expected_column_count: 14
+  schema:
+    essential_columns:
+      - ItemID
+      - ItemEnglishDescriptionWithNumber
+      - StoreNumber
+      - D2_DepartmentName
+      - D3_SubDepartmentName
+      - D4_ClassName
+      - D5_SubClassName
+      - Sum of Total_NetSale
+      - Sum of Total_Quantity
+
+panda:
+  layout:
+    delimiter: ","
+    encoding: utf-8-sig
+    header_row: 1
+    first_data_row: 2
+    header_anchors:
+      - Sku
+      - Store Num
+      - Sales TY With VAT
+      - Qty TY
+    expected_column_count: 28
+  schema:
+    essential_columns:
+      - Sku
+      - SizeDesc
+      - Month
+      - Qty TY
+      - Sales TY With VAT
+      - Store Num
+      - Store Name
+      - StoreType
+      - City
+      - Region
+      - Promo Week
+      - Promo Offer Code
+
+tamimi:
+  layout:
+    header_row: 1
+    first_data_row: 2
+    header_anchors:
+      - Store
+      - Product ID
+    expected_column_count: 11
+  schema:
+    essential_columns:
+      - Store
+      - Store ID
+      - Product
+      - Product ID
+      - Brand
+      - H1:Category
+      - Selling_Unit
+      - Sales Exc Tax
+      - Units
+      - Volume

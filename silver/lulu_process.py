@@ -8,7 +8,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
-from utils.schema_validator import validate_columns
+from utils.validation.schema_validation import validate_schema
 from utils.grammage import extract_grammage
 from utils.validation.source_files_validation import check_expected_sheet
 from utils.validation.layout_validation import check_layout
@@ -18,7 +18,6 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     t0 = time.time()
 
     settings = yaml.safe_load(open(settings_path))
-    config = yaml.safe_load(open(f"{config_path}/lulu.yaml"))
     source_dir = Path(settings["source"]["lulu"]) / str(year) 
     silver_dir = Path(settings["output"]["silver"]) / "Lulu"
     db_path = settings["duckdb"]["path"]
@@ -132,10 +131,9 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     df["Sales Value"] = pd.to_numeric(df["Sales Value"], errors="coerce")
 
     # 15. Validate essential columns
-    ok, err = validate_columns(df, config["essential_columns"], file_path)
+    ok, err = validate_schema(df, retailer="Lulu", file_path=file_path)
     if not ok:
         print(f"[FAIL] {err}")
-        update_pipeline_run(db_path, transform_run_id, "failed", error_msg=err)
         return
 
     # 16. Strip column name whitespace
@@ -151,7 +149,13 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     df = extract_grammage(df, source_column="Product Name", retailer="Lulu")
 
     # 20. Rename columns
-    df = df.rename(columns=config["rename_map"])
+    df = df.rename(columns={
+        "Material": "SKU",
+        "Product Name": "SKU Description",
+        "Material Group Name": "Sub-Department",
+        "Sales Value": "Sales Amount",
+        "Qty Sold (B.Un)": "Sales Quantity",
+    })
 
     # 21. Build Key column (SKU + SizeDesc)
     df["Key"] = df.apply(
