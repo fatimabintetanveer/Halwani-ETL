@@ -1,4 +1,5 @@
 import sys
+import logging
 from pathlib import Path
 import pandas as pd
 import yaml
@@ -11,9 +12,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
 from utils.validation.schema_validation import validate_schema
+from utils.validation.data_validation import (
+    calculate_filter_impact,
+    validate_numeric_columns,
+    validate_parquet_output,
+)
 from utils.grammage import extract_grammage
-from utils.validation.source_files_validation import check_expected_sheet
+from utils.validation.source_files_validation import check_expected_sheet, format_read_error
 from utils.validation.layout_validation import check_layout
+
+logger = logging.getLogger(__name__)
 
 def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
 
@@ -52,7 +60,18 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     print(f"[READ] {file_path}")
 
     # 2. Read raw
-    raw = pd.read_excel(file_path, header=None, engine="calamine")
+    read_run_id = log_pipeline_run(
+        db_path, "Othaim", year, month_label,
+        stage="source_read", status="running", file_path=file_path,
+    )
+    try:
+        raw = pd.read_excel(file_path, header=None, engine="calamine")
+    except Exception as exc:
+        error = format_read_error(exc, retailer="Othaim", file_path=file_path)
+        logger.exception(error)
+        update_pipeline_run(db_path, read_run_id, "failed", error_msg=error)
+        return
+    update_pipeline_run(db_path, read_run_id, "success")
 
     transform_run_id = log_pipeline_run(
         db_path, "Othaim", year, month_label,
@@ -78,6 +97,20 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
         update_pipeline_run(db_path, transform_run_id, "failed", error_msg=err)
         return
 
+    numeric_ok, numeric_metrics, numeric_error = validate_numeric_columns(
+        df,
+        ("Sum of Total_NetSale", "Sum of Total_Quantity"),
+        retailer="Othaim",
+        file_path=file_path,
+    )
+    print(f"[NUMERIC VALIDATION] {numeric_metrics}")
+    if not numeric_ok:
+        print(f"[FAIL] {numeric_error}")
+        update_pipeline_run(
+            db_path, transform_run_id, "failed", error_msg=numeric_error
+        )
+        return
+
     # 6. Remove Grand Total footer row
     first_col = df.columns[0]
     df = df[~df[first_col].astype(str).str.contains("Grand Total", case=False, na=False)]
@@ -86,7 +119,17 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     df.columns = df.columns.str.strip()
 
     # 8. Drop rows with missing SKU
+    before_missing_sku_filter = df
     df = df.dropna(subset=["ItemID"])
+    missing_sku_impact = calculate_filter_impact(
+        before_missing_sku_filter,
+        df,
+        amount_column="Sum of Total_NetSale",
+        quantity_column="Sum of Total_Quantity",
+        retailer="Othaim",
+        filter_name="missing_item_id",
+    )
+    print(f"[FILTER IMPACT] {missing_sku_impact}")
 
     # 9. Extract grammage 
     df = extract_grammage(df, source_column="ItemEnglishDescriptionWithNumber", retailer="Othaim")
@@ -126,6 +169,17 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     silver_dir.mkdir(parents=True, exist_ok=True)
     output_path = silver_dir / str(year) / f"{month_label}-{year}.parquet"
     write_parquet(df, str(output_path))
+
+    output_ok, output_metrics, output_error = validate_parquet_output(
+        df, output_path, retailer="Othaim"
+    )
+    print(f"[SILVER OUTPUT VALIDATION] {output_metrics}")
+    if not output_ok:
+        print(f"[FAIL] {output_error}")
+        update_pipeline_run(
+            db_path, transform_run_id, "failed", error_msg=output_error
+        )
+        return
 
     print(f"[DONE] {len(df)} rows → {output_path}")
 

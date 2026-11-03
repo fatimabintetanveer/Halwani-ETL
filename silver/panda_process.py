@@ -1,5 +1,6 @@
 import sys
 import time
+import logging
 from pathlib import Path
 import polars as pl
 import yaml
@@ -10,7 +11,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
 from utils.validation.schema_validation import validate_schema
+from utils.validation.data_validation import (
+    calculate_filter_impact,
+    validate_numeric_columns,
+    validate_parquet_output,
+)
+from utils.validation.source_files_validation import format_read_error
 from utils.validation.layout_validation import check_layout
+
+logger = logging.getLogger(__name__)
 
 
 def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
@@ -46,17 +55,28 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     print(f"[READ] {Path(file_path).name}")
 
     # 2. Read raw
-    df = pl.read_csv(
-        file_path,
-        low_memory=False,       # use more RAM, fewer passes
-        schema_overrides={
-            "Sku": pl.Utf8,
-            "BARCODE": pl.Utf8,
-            "Store Num": pl.Utf8,
-            "Month": pl.Utf8,
-        },
-        ignore_errors=True,
+    read_run_id = log_pipeline_run(
+        db_path, "Panda", year, month_label,
+        stage="source_read", status="running", file_path=file_path,
     )
+    try:
+        df = pl.read_csv(
+            file_path,
+            low_memory=False,       # use more RAM, fewer passes
+            schema_overrides={
+                "Sku": pl.Utf8,
+                "BARCODE": pl.Utf8,
+                "Store Num": pl.Utf8,
+                "Month": pl.Utf8,
+            }
+            #ignore_errors=True,
+        )
+    except Exception as exc:
+        error = format_read_error(exc, retailer="Panda", file_path=file_path)
+        logger.exception(error)
+        update_pipeline_run(db_path, read_run_id, "failed", error_msg=error)
+        return
+    update_pipeline_run(db_path, read_run_id, "success")
 
     transform_run_id = log_pipeline_run(
         db_path, "Panda", year, month_label,
@@ -73,8 +93,33 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 4. Strip column name whitespace
     df.columns = [c.strip() for c in df.columns]
 
-    # 5. Filter zero/negative qty
+    # 5. Validate source amount and quantity before filtering
+    numeric_ok, numeric_metrics, numeric_error = validate_numeric_columns(
+        df,
+        ("Sales TY With VAT", "Qty TY"),
+        retailer="Panda",
+        file_path=file_path,
+    )
+    print(f"[NUMERIC VALIDATION] {numeric_metrics}")
+    if not numeric_ok:
+        print(f"[FAIL] {numeric_error}")
+        update_pipeline_run(
+            db_path, transform_run_id, "failed", error_msg=numeric_error
+        )
+        return
+
+    # 6. Filter zero/negative qty
+    before_nonpositive_qty_filter = df
     df = df.filter(pl.col("Qty TY") > 0)
+    nonpositive_qty_impact = calculate_filter_impact(
+        before_nonpositive_qty_filter,
+        df,
+        amount_column="Sales TY With VAT",
+        quantity_column="Qty TY",
+        retailer="Panda",
+        filter_name="nonpositive_quantity",
+    )
+    print(f"[FILTER IMPACT] {nonpositive_qty_impact}")
 
     # 6. Strip whitespace from string columns
     string_cols = ["SizeDesc", "Store Name", "StoreType", "City", "Region", "Promo Offer Code"]
@@ -123,6 +168,17 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     silver_dir.mkdir(parents=True, exist_ok=True)
     output_path = silver_dir / str(year) / f"{month_label}-{year}.parquet"
     write_parquet(df, str(output_path))
+
+    output_ok, output_metrics, output_error = validate_parquet_output(
+        df, output_path, retailer="Panda"
+    )
+    print(f"[SILVER OUTPUT VALIDATION] {output_metrics}")
+    if not output_ok:
+        print(f"[FAIL] {output_error}")
+        update_pipeline_run(
+            db_path, transform_run_id, "failed", error_msg=output_error
+        )
+        return
 
     print(f"[DONE] {len(df)} rows → {output_path}")
 

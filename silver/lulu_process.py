@@ -1,5 +1,6 @@
 import sys
 import time
+import logging
 from pathlib import Path
 import pandas as pd
 import yaml
@@ -9,9 +10,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
 from utils.validation.schema_validation import validate_schema
+from utils.validation.data_validation import (
+    calculate_filter_impact,
+    validate_identifier_columns,
+    validate_numeric_columns,
+    validate_parquet_output,
+)
 from utils.grammage import extract_grammage
-from utils.validation.source_files_validation import check_expected_sheet
+from utils.validation.source_files_validation import check_expected_sheet, format_read_error
 from utils.validation.layout_validation import check_layout
+
+logger = logging.getLogger(__name__)
 
 
 def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
@@ -42,8 +51,19 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
 
     print(f"[READ] {Path(file_path).name}")
 
-    # 2. Read raw (calamine, multi-row header)
-    df = pd.read_excel(file_path, sheet_name="Sheet1", header=None, engine="calamine")
+    # 2. Read raw 
+    read_run_id = log_pipeline_run(
+        db_path, "Lulu", year, month_label,
+        stage="source_read", status="running", file_path=file_path,
+    )
+    try:
+        df = pd.read_excel(file_path, sheet_name="Sheet1", header=None, engine="calamine")
+    except Exception as exc:
+        error = format_read_error(exc, retailer="Lulu", file_path=file_path)
+        logger.exception(error)
+        update_pipeline_run(db_path, read_run_id, "failed", error_msg=error)
+        return
+    update_pipeline_run(db_path, read_run_id, "success")
 
 
         # Start tracking the Silver transformation stage
@@ -127,15 +147,40 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
         df["Qty Sold (B.Un)"] = 0
     if "Sales Value" not in df.columns:
         df["Sales Value"] = 0
-    df["Qty Sold (B.Un)"] = pd.to_numeric(df["Qty Sold (B.Un)"], errors="coerce")
-    df["Sales Value"] = pd.to_numeric(df["Sales Value"], errors="coerce")
 
-    # 15. Validate essential columns
+    # 15. Validate essential columns before validating their values
     ok, err = validate_schema(df, retailer="Lulu", file_path=file_path)
     if not ok:
         print(f"[FAIL] {err}")
         update_pipeline_run(db_path, transform_run_id, "failed", error_msg=err)
         return
+
+    numeric_ok, numeric_metrics, numeric_error = validate_numeric_columns(
+        df,
+        ("Sales Value", "Qty Sold (B.Un)"),
+        retailer="Lulu",
+        file_path=file_path,
+    )
+    print(f"[NUMERIC VALIDATION] {numeric_metrics}")
+    if not numeric_ok:
+        print(f"[FAIL] {numeric_error}")
+        update_pipeline_run(
+            db_path, transform_run_id, "failed", error_msg=numeric_error
+        )
+        return
+
+    identifier_ok, identifier_metrics, identifier_error = validate_identifier_columns(
+        df,
+        ("Material", "Store Num"),
+        retailer="Lulu",
+        file_path=file_path,
+    )
+    print(f"[IDENTIFIER VALIDATION] {identifier_metrics}")
+    if not identifier_ok:
+        print(f"[WARNING] {identifier_error}")
+
+    df["Qty Sold (B.Un)"] = pd.to_numeric(df["Qty Sold (B.Un)"], errors="coerce")
+    df["Sales Value"] = pd.to_numeric(df["Sales Value"], errors="coerce")
 
     # 16. Strip column name whitespace
     df.columns = [c.strip() for c in df.columns]
@@ -144,7 +189,17 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     df = df.dropna(subset=["Material"])
 
     # 18. Drop zero qty rows
+    before_zero_qty_filter = df
     df = df[df["Qty Sold (B.Un)"] > 0]
+    zero_qty_impact = calculate_filter_impact(
+        before_zero_qty_filter,
+        df,
+        amount_column="Sales Value",
+        quantity_column="Qty Sold (B.Un)",
+        retailer="Lulu",
+        filter_name="zero_quantity",
+    )
+    print(f"[FILTER IMPACT] {zero_qty_impact}")
 
     # 19. Extract grammage from Product Name 
     df = extract_grammage(df, source_column="Product Name", retailer="Lulu")
@@ -177,6 +232,17 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     silver_dir.mkdir(parents=True, exist_ok=True)
     output_path = silver_dir / str(year) / f"{month_label}-{year}.parquet"
     write_parquet(df, str(output_path))
+
+    output_ok, output_metrics, output_error = validate_parquet_output(
+        df, output_path, retailer="Lulu"
+    )
+    print(f"[SILVER OUTPUT VALIDATION] {output_metrics}")
+    if not output_ok:
+        print(f"[FAIL] {output_error}")
+        update_pipeline_run(
+            db_path, transform_run_id, "failed", error_msg=output_error
+        )
+        return
 
     print(f"[DONE] {len(df)} rows → {output_path}")
     print(f"Time: {time.time() - t0:.1f}s")

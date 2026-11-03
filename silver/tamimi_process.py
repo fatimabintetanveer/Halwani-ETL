@@ -1,4 +1,5 @@
 import sys
+import logging
 from pathlib import Path
 import pandas as pd
 import yaml
@@ -11,9 +12,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
 from utils.validation.schema_validation import validate_schema
-from utils.validation.source_files_validation import check_expected_sheet
+from utils.validation.data_validation import (
+    calculate_filter_impact,
+    validate_numeric_columns,
+    validate_parquet_output,
+)
+from utils.validation.source_files_validation import check_expected_sheet, format_read_error
 from utils.grammage import extract_grammage
 from utils.validation.layout_validation import check_layout
+
+logger = logging.getLogger(__name__)
 
 
 def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
@@ -53,7 +61,18 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     print(f"[READ] {file_path}")
 
     # 2. Read raw
-    df = pd.read_excel(file_path)
+    read_run_id = log_pipeline_run(
+        db_path, "Tamimi", year, month_label,
+        stage="source_read", status="running", file_path=file_path,
+    )
+    try:
+        df = pd.read_excel(file_path)
+    except Exception as exc:
+        error = format_read_error(exc, retailer="Tamimi", file_path=file_path)
+        logger.exception(error)
+        update_pipeline_run(db_path, read_run_id, "failed", error_msg=error)
+        return
+    update_pipeline_run(db_path, read_run_id, "success")
 
     transform_run_id = log_pipeline_run(
         db_path, "Tamimi", year, month_label,
@@ -70,15 +89,22 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 4. Strip column name whitespace
     df.columns = df.columns.str.strip()
 
-    # 5. Drop rows with missing SKU
-    df = df.dropna(subset=["Product ID"])
+    # 5. Validate numeric source fields before filters and quantity calculations
+    numeric_ok, numeric_metrics, numeric_error = validate_numeric_columns(
+        df,
+        ("Sales Exc Tax", "Units", "Volume"),
+        retailer="Tamimi",
+        file_path=file_path,
+    )
+    print(f"[NUMERIC VALIDATION] {numeric_metrics}")
+    if not numeric_ok:
+        print(f"[FAIL] {numeric_error}")
+        update_pipeline_run(
+            db_path, transform_run_id, "failed", error_msg=numeric_error
+        )
+        return
 
-    # 6. Strip whitespace from text columns
-    for col in ["Store", "Product", "Product ID", "H1:Category", "Brand"]:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-
-    # 7. Merge Units/Volume into Sales Qty (KG items use Volume, others use Units)
+    # 6. Calculate quantity before measuring rows removed for missing SKU
     df["Sales Qty"] = df.apply(
         lambda row: row["Volume"]
         if str(row["Selling_Unit"]).strip().upper() == "KG"
@@ -86,7 +112,25 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
         axis=1,
     )
 
-    # 8. Clean store names: strip trailing "[S101]" code and commas
+    # 7. Drop rows with missing SKU and measure the removed totals
+    before_missing_sku_filter = df
+    df = df.dropna(subset=["Product ID"])
+    missing_sku_impact = calculate_filter_impact(
+        before_missing_sku_filter,
+        df,
+        amount_column="Sales Exc Tax",
+        quantity_column="Sales Qty",
+        retailer="Tamimi",
+        filter_name="missing_product_id",
+    )
+    print(f"[FILTER IMPACT] {missing_sku_impact}")
+
+    # 8. Strip whitespace from text columns
+    for col in ["Store", "Product", "Product ID", "H1:Category", "Brand"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+
+    # 9. Clean store names: strip trailing "[S101]" code and commas
     df["Store"] = df["Store"].str.replace(r"\s\[\w+\]$", "", regex=True)
     df["Store"] = df["Store"].str.rstrip(",").str.strip()
 
@@ -142,6 +186,17 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     silver_dir.mkdir(parents=True, exist_ok=True)
     output_path = silver_dir / str(year) / f"{month_label}-{year}.parquet"
     write_parquet(df, str(output_path))
+
+    output_ok, output_metrics, output_error = validate_parquet_output(
+        df, output_path, retailer="Tamimi"
+    )
+    print(f"[SILVER OUTPUT VALIDATION] {output_metrics}")
+    if not output_ok:
+        print(f"[FAIL] {output_error}")
+        update_pipeline_run(
+            db_path, transform_run_id, "failed", error_msg=output_error
+        )
+        return
 
     print(f"[DONE] {len(df)} rows → {output_path}")
 

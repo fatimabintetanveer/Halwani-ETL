@@ -197,3 +197,25 @@ def check_expected_sheet(
         f"available sheets: {available_sheets}"
     )
     return None, message
+
+def format_read_error(
+    exc: Exception,
+    *,
+    retailer: str,
+    file_path: str | Path,
+) -> str:
+    path = Path(file_path)
+
+    if isinstance(exc, FileNotFoundError):
+        category = "file not found"
+    elif isinstance(exc, PermissionError):
+        category = "access denied"
+    elif isinstance(exc, ImportError):
+        category = "reader engine unavailable"
+    else:
+        category = "file could not be read"
+
+    return (
+        f"{retailer} source read failed ({category}) for "
+        f"{path.name}: {type(exc).__name__}: {exc}"
+    )

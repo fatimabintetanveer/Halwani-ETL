@@ -60,19 +60,11 @@ def validate_schema(
         name for name, count in actual_counts.items() if count > 1
     )
     missing = sorted(set(normalized_required) - set(normalized_actual))
-    unexpected = sorted(set(normalized_actual) - set(normalized_required))
 
     context = " ".join(
         value for value in (retailer, Path(file_path).name if file_path else "") if value
     )
     label = f" for {context}" if context else ""
-
-    if unexpected:
-        logger.warning(
-            "Unexpected column(s)%s: %s",
-            label,
-            ", ".join(unexpected),
-        )
 
     if duplicates or missing:
         problems = []
