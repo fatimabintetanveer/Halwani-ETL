@@ -46,10 +46,16 @@ def load_pipeline_runs(database_path: Path) -> pd.DataFrame:
                 month,
                 stage,
                 status,
+                dbt_model_name,
+                dbt_invocation_id,
                 started_at,
                 completed_at,
-                rows_processed,
-                file_path,
+                CASE
+                    WHEN status = 'running'
+                    THEN date_diff('microsecond', started_at, CURRENT_TIMESTAMP) / 1000000.0
+                    ELSE duration_seconds
+                END AS duration_seconds,
+                source_file_name,
                 error_message
             FROM pipeline_runs
             ORDER BY started_at DESC, run_id DESC
@@ -64,7 +70,7 @@ st.caption("Recent pipeline stage statuses from the configured DuckDB database."
 st.caption("This page checks for updates every 0.1 seconds.")
 
 
-@st.fragment(run_every=0.1)
+@st.fragment(run_every=5)
 def show_pipeline_runs() -> None:
     if st.button("Refresh"):
         st.rerun()

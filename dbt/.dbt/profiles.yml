@@ -3,4 +3,7 @@ halwani_mdm:
     dev:
       type: duckdb
       path: 'D:\Halwani\Halwani-ETL\data\halwani_warehouse.db'
+    test:
+      type: duckdb
+      path: 'D:\Halwani\Halwani-ETL\data\halwani_warehouse_test.db'
   target: dev

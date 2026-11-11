@@ -1,0 +1,9 @@
+version: 2
+
+models:
+  - name: stg_master_sku_mapping
+    columns:
+      - name: Key
+        data_tests:
+          - not_null
+          - unique

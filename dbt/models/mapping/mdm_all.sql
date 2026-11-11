@@ -1,12 +1,22 @@
+{% set month = var('month', none) %}
+{% set year = var('year', none) %}
+{% set retailer = var('retailer', none) %}
+{% set period_label = month ~ '-' ~ (year | string)[-2:] if month and year else none %}
+
+
 {{ config(
     materialized='incremental',
-    incremental_strategy='delete+insert',
-    unique_key=['Key', 'Month', 'Retailer'],
-    alias='harmonized_mapping'
+    incremental_strategy='append',
+    alias='harmonized_mapping',
+    pre_hook="{% if is_incremental() and var('month', none) and var('year', none) and var('retailer', none) %}{% set period_label = var('month') ~ '-' ~ ((var('year') | string)[-2:]) %}DELETE FROM {{ this }} WHERE Month = '{{ period_label }}' AND Retailer = '{{ var('retailer') }}'{% endif %}"
 ) }}
 
-{% set month = var('month', none) %}
-{% set retailer = var('retailer', none) %}
+{% if is_incremental() and (not month or not year or not retailer) %}
+    {{ exceptions.raise_compiler_error(
+        "Incremental mdm_all runs require 'month', 'year', and 'retailer' vars. "
+        ~ "Use --full-refresh for a full rebuild."
+    ) }}
+{% endif %}
 
 WITH raw AS (
     SELECT
@@ -45,7 +55,7 @@ sku_mapping AS(
 SELECT
     s.Key,
     s.Month,
-    m.Retailer,
+    s.Retailer,
     m.Description,
     m."Sub-Deptartment",
     m.BASKET, m.CATEGORY, m.SUB_CATEGORY, m.COMPANY, m.BRAND,
@@ -68,7 +78,7 @@ LEFT JOIN sku_mapping m
     ON UPPER(TRIM(s.Key)) = UPPER(m.Key)
 WHERE m.Active_Inactive != 1 OR m.Active_Inactive IS NULL
     {% if is_incremental() %}
-        {% if month %}AND s.Month = '{{ month }}'{% endif %}
+        {% if period_label %}AND s.Month = '{{ period_label }}'{% endif %}
         {% if retailer %}AND s.Retailer = '{{ retailer }}'{% endif %}
     {% endif %}
 GROUP BY ALL

@@ -187,15 +187,17 @@ def log_pipeline_run(
     month: str,
     stage: str,
     status: str,
-    rows: int = 0,
-    file_path: str = "",
+    source_file_name: str | None = None,
     error_msg: str = None,
+    dbt_invocation_id: str | None = None,
+    dbt_model_name: str | None = None,
+    duration_seconds: float | None = None,
 ) -> int:
     """
     Insert a row into the pipeline_runs table in DuckDB.
     Creates the table if it doesn't exist yet.
 
-    status: 'success' | 'failed' | 'skipped'
+    status: 'running' | 'success' | 'failed' | 'skipped'
     """
     con = duckdb.connect(db_path)
 
@@ -211,21 +213,58 @@ def log_pipeline_run(
             month         VARCHAR NOT NULL,
             stage         VARCHAR NOT NULL,
             status        VARCHAR NOT NULL,
-            rows_processed INTEGER,
-            file_path     VARCHAR,
+            source_file_name VARCHAR,
             error_message VARCHAR,
+            dbt_invocation_id VARCHAR,
+            dbt_model_name VARCHAR,
+            duration_seconds DOUBLE,
             started_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
+    # Add columns to databases created before these logging updates.
+    con.execute("ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS dbt_invocation_id VARCHAR")
+    con.execute("ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS dbt_model_name VARCHAR")
+    con.execute("ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE")
+    con.execute("ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS source_file_name VARCHAR")
+    existing_columns = {
+        row[0]
+        for row in con.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'pipeline_runs'
+            """
+        ).fetchall()
+    }
+    if "file_path" in existing_columns:
+        con.execute("""
+            UPDATE pipeline_runs
+            SET source_file_name = regexp_extract(
+                replace(file_path, chr(92), '/'), '[^/]+$'
+            )
+            WHERE source_file_name IS NULL
+              AND file_path IS NOT NULL
+              AND file_path <> ''
+        """)
+        con.execute("ALTER TABLE pipeline_runs DROP COLUMN file_path")
+    if "rows_processed" in existing_columns:
+        con.execute("ALTER TABLE pipeline_runs DROP COLUMN rows_processed")
+
     # Insert the run record and return its generated ID.
     result = con.execute("""
         INSERT INTO pipeline_runs
-            (retailer, year, month, stage, status, rows_processed, file_path, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?,?)
+            (retailer, year, month, stage, status, source_file_name,
+             error_message, dbt_invocation_id, dbt_model_name, duration_seconds,
+             started_at, completed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
+                CASE WHEN ? = 'running' THEN NULL ELSE CURRENT_TIMESTAMP END)
         RETURNING run_id
-    """, [retailer, year, month, stage, status, rows, file_path, error_msg]).fetchone()
+    """, [
+        retailer, year, month, stage, status, source_file_name, error_msg,
+        dbt_invocation_id, dbt_model_name, duration_seconds, status,
+    ]).fetchone()
 
     con.close()
     return result[0]
@@ -236,13 +275,18 @@ def update_pipeline_run(
     run_id: int,
     status: str,
     error_msg: str | None = None,
+    dbt_invocation_id: str | None = None,
+    dbt_model_name: str | None = None,
+    duration_seconds: float | None = None,
+    source_file_name: str | None = None,
 ) -> None:
     """Update a pipeline_runs row when a stage finishes.
 
-    Sets ``completed_at`` to the current time and updates the status. If an
-    error message is provided, it replaces the row's existing error message.
+    Sets ``completed_at`` and calculates the elapsed duration when a stage
+    reaches a terminal status. If an error message is provided, it replaces
+    the row's existing error message.
     """
-    allowed_statuses = {"running", "success", "failed"}
+    allowed_statuses = {"running", "success", "failed", "skipped"}
     if status not in allowed_statuses:
         raise ValueError(
             f"Unsupported pipeline status {status!r}; "
@@ -256,11 +300,21 @@ def update_pipeline_run(
             UPDATE pipeline_runs
             SET status = ?,
                 error_message = COALESCE(?, error_message),
-                completed_at = CURRENT_TIMESTAMP
+                source_file_name = COALESCE(?, source_file_name),
+                dbt_invocation_id = COALESCE(?, dbt_invocation_id),
+                dbt_model_name = COALESCE(?, dbt_model_name),
+                duration_seconds = CASE
+                    WHEN ? = 'running' THEN NULL
+                    ELSE COALESCE(
+                        ?, date_diff('microsecond', started_at, CURRENT_TIMESTAMP) / 1000000.0
+                    )
+                END,
+                completed_at = CASE WHEN ? = 'running' THEN NULL ELSE CURRENT_TIMESTAMP END
             WHERE run_id = ?
             RETURNING run_id
             """,
-            [status, error_msg, run_id],
+            [status, error_msg, source_file_name, dbt_invocation_id, dbt_model_name,
+             status, duration_seconds, status, run_id],
         ).fetchone()
 
         if result is None:

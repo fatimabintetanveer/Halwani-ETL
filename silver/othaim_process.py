@@ -31,19 +31,30 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     db_path = settings["duckdb"]["path"]
 
     # 1. Find file
-    file_path, error_message = find_file(
-        str(source_dir), month_label, year, extensions=(".xlsb",), retailer="Othaim"
+    discover_run_id = log_pipeline_run(
+        db_path, "Othaim", year, month_label,
+        stage="discover_file", status="running",
     )
-    if file_path is None:
-        log_pipeline_run(
-            db_path, "Othaim", year, month_label, "discover_file", "failed",
-            error_msg=error_message,
+    try:
+        file_path, error_message = find_file(
+            str(source_dir), month_label, year,
+            extensions=(".xlsb",), retailer="Othaim",
         )
+    except Exception as exc:
+        error_message = (
+            f"Othaim file discovery failed for {year} - {month_label}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        update_pipeline_run(db_path, discover_run_id, "failed", error_msg=error_message)
         return
 
-    log_pipeline_run(
-        db_path, "Othaim", year, month_label, "discover_file", "success",
-        file_path=file_path,
+    if file_path is None:
+        update_pipeline_run(db_path, discover_run_id, "failed", error_msg=error_message)
+        return
+
+    source_file_name = Path(file_path).name
+    update_pipeline_run(
+        db_path, discover_run_id, "success", source_file_name=source_file_name,
     )
 
     sheet_name, error = check_expected_sheet(file_path, expected_sheets=("Sheet1",), retailer="Othaim")
@@ -62,7 +73,7 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 2. Read raw
     read_run_id = log_pipeline_run(
         db_path, "Othaim", year, month_label,
-        stage="source_read", status="running", file_path=file_path,
+        stage="source_read", status="running", source_file_name=source_file_name,
     )
     try:
         raw = pd.read_excel(file_path, header=None, engine="calamine")
@@ -75,7 +86,7 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
 
     transform_run_id = log_pipeline_run(
         db_path, "Othaim", year, month_label,
-        stage="silver_transform", status="running", file_path=file_path,
+        stage="silver_transform", status="running", source_file_name=source_file_name,
     )
 
     # 3. Detect format (old: "Values" noise at row 0, new: header at row 0)
