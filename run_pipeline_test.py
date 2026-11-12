@@ -22,6 +22,8 @@ DBT_PROFILE_NAME = "halwani_mdm"
 DBT_TARGET = "dev"
 DBT_MAPPING_MODEL = "mdm_all"
 DBT_MAPPING_STAGE = "dbt_mapping"
+DBT_LOAD_MAPPING_MODELS = ("master_sku_mapping", "master_store_mapping")
+DBT_LOAD_MAPPING_STAGE = "load_mapping"
 DBT_DIMENSION_MODELS = ("dim_product", "dim_store")
 DBT_DIMENSION_STAGE = "dimension_modeling"
 DBT_FACT_MODELS = ("fct_sales",)
@@ -36,6 +38,7 @@ from silver.panda_process import process as panda_process
 from silver.lulu_process import process as lulu_process
 from utils.io import (
     log_pipeline_run,
+    next_pipeline_id,
     update_pipeline_run,
 )
 from utils.views import refresh_silver_views, build_unified_silver
@@ -49,32 +52,9 @@ ADAPTERS = {
 }
 
 
-def resolve_project_path(value: str | Path) -> Path:
-    path = Path(value).expanduser()
-    return path.resolve() if path.is_absolute() else (PROJECT_DIR / path).resolve()
-
-
-def read_latest_pipeline_run_id(db_path: Path) -> int:
-    if not db_path.is_file():
-        return 0
-
-    with duckdb.connect(str(db_path), read_only=True) as connection:
-        exists = connection.execute(
-            """
-            SELECT COUNT(*) FROM information_schema.tables
-            WHERE table_name = 'pipeline_runs'
-            """
-        ).fetchone()[0]
-        if not exists:
-            return 0
-        return connection.execute(
-            "SELECT COALESCE(MAX(run_id), 0) FROM pipeline_runs"
-        ).fetchone()[0]
-
-
 def silver_transform_succeeded(
     db_path: Path,
-    previous_max_run_id: int,
+    p_id: str,
     retailer: str,
     year: int,
     month: str,
@@ -87,14 +67,14 @@ def silver_transform_succeeded(
             """
             SELECT stage, status, source_file_name
             FROM pipeline_runs
-            WHERE run_id > ?
+            WHERE p_id = ?
               AND retailer = ?
               AND year = ?
               AND month = ?
               AND stage IN ('discover_file', 'silver_transform')
             ORDER BY run_id DESC
             """,
-            [previous_max_run_id, retailer, year, month],
+            [p_id, retailer, year, month],
         ).fetchall()
 
     transform_row = next((row for row in rows if row[0] == "silver_transform"), None)
@@ -120,21 +100,6 @@ def get_dbt_target_database(target: str) -> Path:
 
     path = Path(database_path).expanduser()
     return path.resolve() if path.is_absolute() else (DBT_DIR / path).resolve()
-
-
-def has_mdm_all_source_retailer_column(database_path: Path) -> bool:
-    if not database_path.is_file():
-        return False
-
-    with duckdb.connect(str(database_path), read_only=True) as connection:
-        return connection.execute(
-            """
-            SELECT COUNT(*) > 0
-            FROM information_schema.columns
-            WHERE table_name = 'harmonized_mapping'
-              AND column_name = 'Retailer'
-            """
-        ).fetchone()[0]
 
 
 def collect_dbt_output(command: list[str]) -> tuple[int, list[str]]:
@@ -166,6 +131,7 @@ def run_dbt_model_stage(
     month: str,
     model_name: str,
     stage_name: str,
+    p_id: str,
     source_file_name: str | None = None,
     dbt_vars: dict | None = None,
 ) -> bool:
@@ -176,6 +142,7 @@ def run_dbt_model_stage(
         month,
         stage=stage_name,
         status="running",
+        p_id=p_id,
         dbt_model_name=model_name,
         source_file_name=source_file_name,
     )
@@ -190,12 +157,6 @@ def run_dbt_model_stage(
                 f"Python uses {log_db_path}; dbt target '{DBT_TARGET}' uses {dbt_database}."
             )
 
-        if model_name == DBT_MAPPING_MODEL and not has_mdm_all_source_retailer_column(dbt_database):
-            raise RuntimeError(
-                "The dev harmonized_mapping table does not have Source_Retailer. "
-                "Run the one-time dbt full refresh on dev before the monthly run."
-            )
-
         dbt_executable = shutil.which("dbt")
         if dbt_executable is None:
             fallback = PROJECT_DIR / "venv" / "Scripts" / "dbt.exe"
@@ -203,7 +164,7 @@ def run_dbt_model_stage(
 
         command = [
             dbt_executable,
-            "build",
+            "run",
             "--profiles-dir", str(DBT_PROFILE_DIR),
             "--target", DBT_TARGET,
             "--select", model_name,
@@ -215,6 +176,7 @@ def run_dbt_model_stage(
         previous_artifact_mtime = (
             results_path.stat().st_mtime_ns if results_path.exists() else None
         )
+
         return_code, output_lines = collect_dbt_output(command)
         duration = time.perf_counter() - started
 
@@ -302,6 +264,7 @@ def log_skipped_dbt_model(
     model_name: str,
     stage_name: str,
     reason: str,
+    p_id: str,
     source_file_name: str | None = None,
 ) -> None:
     run_id = log_pipeline_run(
@@ -311,6 +274,7 @@ def log_skipped_dbt_model(
         month,
         stage=stage_name,
         status="running",
+        p_id=p_id,
         dbt_model_name=model_name,
         source_file_name=source_file_name,
     )
@@ -332,6 +296,8 @@ def log_skipped_dbt_models(
     models: tuple[str, ...],
     stage_name: str,
     reason: str,
+    p_id: str,
+    source_file_name: str | None = None,
 ) -> None:
     for model_name in models:
         log_skipped_dbt_model(
@@ -342,6 +308,8 @@ def log_skipped_dbt_models(
             model_name=model_name,
             stage_name=stage_name,
             reason=reason,
+            p_id=p_id,
+            source_file_name=source_file_name,
         )
 
 
@@ -355,28 +323,40 @@ def main() -> int:
     parser.add_argument("--settings", default="config/settings.yaml")
     args = parser.parse_args()
 
-    settings_path = resolve_project_path(args.settings)
-    config_path = resolve_project_path(args.config)
+    settings_path = Path(args.settings).expanduser().resolve()
+    config_path = Path(args.config).expanduser().resolve()
     with settings_path.open(encoding="utf-8") as settings_file:
         settings = yaml.safe_load(settings_file)
 
     process_fn = ADAPTERS[args.retailer]
-    db_path = resolve_project_path(settings["duckdb"]["path"])
-    silver_dir = resolve_project_path(settings["output"]["silver"])
+    db_path = Path(settings["duckdb"]["path"]).expanduser().resolve()
+    silver_dir = Path(settings["output"]["silver"]).expanduser().resolve()
 
     print(f"Processing {args.retailer} {args.year} - {args.month}")
-    previous_max_run_id = read_latest_pipeline_run_id(db_path)
-    process_fn(args.year, args.month, str(config_path), str(settings_path))
+    p_id = next_pipeline_id(str(db_path))
+    print(f"Pipeline run ID: {p_id}")
+    process_fn(args.year, args.month, str(config_path), str(settings_path), p_id=p_id)
 
     # Refresh the regular pipeline database, as the original runner does.
     refresh_silver_views(str(db_path), str(silver_dir), args.retailer)
     build_unified_silver(str(db_path))
 
     transform_succeeded, source_file_name = silver_transform_succeeded(
-        db_path, previous_max_run_id, args.retailer, args.year, args.month
+        db_path, p_id, args.retailer, args.year, args.month
     )
     if not transform_succeeded:
         reason = "Skipped because this month's Silver transform did not succeed"
+        log_skipped_dbt_models(
+            log_db_path=db_path,
+            retailer=args.retailer,
+            year=args.year,
+            month=args.month,
+            models=DBT_LOAD_MAPPING_MODELS,
+            stage_name=DBT_LOAD_MAPPING_STAGE,
+            reason="Skipped because this month's Silver transform did not succeed",
+            p_id=p_id,
+            source_file_name=source_file_name,
+        )
         log_skipped_dbt_model(
             log_db_path=db_path,
             retailer=args.retailer,
@@ -384,7 +364,8 @@ def main() -> int:
             month=args.month,
             model_name=DBT_MAPPING_MODEL,
             stage_name=DBT_MAPPING_STAGE,
-            reason=reason,
+            reason="Skipped because this month's Silver transform did not succeed",
+            p_id=p_id,
             source_file_name=source_file_name,
         )
         log_skipped_dbt_models(
@@ -394,7 +375,9 @@ def main() -> int:
             month=args.month,
             models=DBT_DIMENSION_MODELS,
             stage_name=DBT_DIMENSION_STAGE,
-            reason="Skipped because the mapping model did not run",
+            reason="Skipped because this month's Silver transform did not succeed",
+            p_id=p_id,
+            source_file_name=source_file_name,
         )
         log_skipped_dbt_models(
             log_db_path=db_path,
@@ -403,10 +386,71 @@ def main() -> int:
             month=args.month,
             models=DBT_FACT_MODELS,
             stage_name=DBT_FACT_STAGE,
-            reason="Skipped because the mapping model did not run",
+            reason="Skipped because this month's Silver transform did not succeed",
+            p_id=p_id,
+            source_file_name=source_file_name,
         )
         print(f"[DBT SKIP] {reason}")
         return 1
+
+    for index, model_name in enumerate(DBT_LOAD_MAPPING_MODELS):
+        load_ok = run_dbt_model_stage(
+            log_db_path=db_path,
+            retailer=args.retailer,
+            year=args.year,
+            month=args.month,
+            model_name=model_name,
+            stage_name=DBT_LOAD_MAPPING_STAGE,
+            p_id=p_id,
+            source_file_name=source_file_name,
+        )
+        if not load_ok:
+            reason = f"Skipped because mapping load model {model_name} failed"
+            log_skipped_dbt_models(
+                log_db_path=db_path,
+                retailer=args.retailer,
+                year=args.year,
+                month=args.month,
+                models=DBT_LOAD_MAPPING_MODELS[index + 1 :],
+                stage_name=DBT_LOAD_MAPPING_STAGE,
+                reason=reason,
+                p_id=p_id,
+                source_file_name=source_file_name,
+            )
+            log_skipped_dbt_model(
+                log_db_path=db_path,
+                retailer=args.retailer,
+                year=args.year,
+                month=args.month,
+                model_name=DBT_MAPPING_MODEL,
+                stage_name=DBT_MAPPING_STAGE,
+                reason=reason,
+                p_id=p_id,
+                source_file_name=source_file_name,
+            )
+            log_skipped_dbt_models(
+                log_db_path=db_path,
+                retailer=args.retailer,
+                year=args.year,
+                month=args.month,
+                models=DBT_DIMENSION_MODELS,
+                stage_name=DBT_DIMENSION_STAGE,
+                reason=reason,
+                p_id=p_id,
+                source_file_name=source_file_name,
+            )
+            log_skipped_dbt_models(
+                log_db_path=db_path,
+                retailer=args.retailer,
+                year=args.year,
+                month=args.month,
+                models=DBT_FACT_MODELS,
+                stage_name=DBT_FACT_STAGE,
+                reason=reason,
+                p_id=p_id,
+                source_file_name=source_file_name,
+            )
+            return 1
 
     mapping_ok = run_dbt_model_stage(
         log_db_path=db_path,
@@ -415,6 +459,7 @@ def main() -> int:
         month=args.month,
         model_name=DBT_MAPPING_MODEL,
         stage_name=DBT_MAPPING_STAGE,
+        p_id=p_id,
         source_file_name=source_file_name,
         dbt_vars={
             "month": args.month,
@@ -432,6 +477,8 @@ def main() -> int:
             models=DBT_DIMENSION_MODELS,
             stage_name=DBT_DIMENSION_STAGE,
             reason=reason,
+            p_id=p_id,
+            source_file_name=source_file_name,
         )
         log_skipped_dbt_models(
             log_db_path=db_path,
@@ -441,6 +488,8 @@ def main() -> int:
             models=DBT_FACT_MODELS,
             stage_name=DBT_FACT_STAGE,
             reason=reason,
+            p_id=p_id,
+            source_file_name=source_file_name,
         )
         return 1
 
@@ -452,6 +501,8 @@ def main() -> int:
             month=args.month,
             model_name=model_name,
             stage_name=DBT_DIMENSION_STAGE,
+            p_id=p_id,
+            source_file_name=source_file_name,
         )
         if not dimension_ok:
             reason = f"Skipped because dimension model {model_name} failed"
@@ -463,6 +514,8 @@ def main() -> int:
                 models=DBT_DIMENSION_MODELS[index + 1 :],
                 stage_name=DBT_DIMENSION_STAGE,
                 reason=reason,
+                p_id=p_id,
+                source_file_name=source_file_name,
             )
             log_skipped_dbt_models(
                 log_db_path=db_path,
@@ -472,6 +525,8 @@ def main() -> int:
                 models=DBT_FACT_MODELS,
                 stage_name=DBT_FACT_STAGE,
                 reason=reason,
+                p_id=p_id,
+                source_file_name=source_file_name,
             )
             return 1
 
@@ -483,6 +538,8 @@ def main() -> int:
             month=args.month,
             model_name=model_name,
             stage_name=DBT_FACT_STAGE,
+            p_id=p_id,
+            source_file_name=source_file_name,
         )
         if not fact_ok:
             log_skipped_dbt_models(
@@ -493,6 +550,8 @@ def main() -> int:
                 models=DBT_FACT_MODELS[index + 1 :],
                 stage_name=DBT_FACT_STAGE,
                 reason=f"Skipped because fact model {model_name} failed",
+                p_id=p_id,
+                source_file_name=source_file_name,
             )
             return 1
 

@@ -180,6 +180,49 @@ def write_parquet(df: pl.DataFrame | pd.DataFrame, output_path: str) -> str:
     return str(out)
 
 
+def next_pipeline_id(db_path: str) -> str:
+    """Allocate the next sequential ID shared by the stages of one run."""
+    con = duckdb.connect(db_path)
+    try:
+        table_exists = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_name = 'pipeline_runs'
+            """
+        ).fetchone()[0] > 0
+
+        highest_existing_id = 0
+        if table_exists:
+            columns = {
+                row[0]
+                for row in con.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'pipeline_runs'
+                    """
+                ).fetchall()
+            }
+            if "p_id" in columns:
+                highest_existing_id = con.execute(
+                    """
+                    SELECT COALESCE(MAX(TRY_CAST(p_id AS BIGINT)), 0)
+                    FROM pipeline_runs
+                    """
+                ).fetchone()[0]
+
+        sequence_start = int(highest_existing_id) + 1
+        con.execute(
+            f"CREATE SEQUENCE IF NOT EXISTS pipeline_parent_run_seq START {sequence_start}"
+        )
+        return str(con.execute(
+            "SELECT nextval('pipeline_parent_run_seq')"
+        ).fetchone()[0])
+    finally:
+        con.close()
+
+
 def log_pipeline_run(
     db_path: str,
     retailer: str,
@@ -187,6 +230,7 @@ def log_pipeline_run(
     month: str,
     stage: str,
     status: str,
+    p_id: str | None = None,
     source_file_name: str | None = None,
     error_msg: str = None,
     dbt_invocation_id: str | None = None,
@@ -208,6 +252,7 @@ def log_pipeline_run(
     con.execute("""
         CREATE TABLE IF NOT EXISTS pipeline_runs (
             run_id        INTEGER PRIMARY KEY DEFAULT nextval('pipeline_run_seq'),
+            p_id          VARCHAR,
             retailer      VARCHAR NOT NULL,
             year          INTEGER NOT NULL,
             month         VARCHAR NOT NULL,
@@ -228,6 +273,7 @@ def log_pipeline_run(
     con.execute("ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS dbt_model_name VARCHAR")
     con.execute("ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE")
     con.execute("ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS source_file_name VARCHAR")
+    con.execute("ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS p_id VARCHAR")
     existing_columns = {
         row[0]
         for row in con.execute(
@@ -255,14 +301,14 @@ def log_pipeline_run(
     # Insert the run record and return its generated ID.
     result = con.execute("""
         INSERT INTO pipeline_runs
-            (retailer, year, month, stage, status, source_file_name,
+            (retailer, year, month, stage, status, p_id, source_file_name,
              error_message, dbt_invocation_id, dbt_model_name, duration_seconds,
              started_at, completed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
                 CASE WHEN ? = 'running' THEN NULL ELSE CURRENT_TIMESTAMP END)
         RETURNING run_id
     """, [
-        retailer, year, month, stage, status, source_file_name, error_msg,
+        retailer, year, month, stage, status, p_id, source_file_name, error_msg,
         dbt_invocation_id, dbt_model_name, duration_seconds, status,
     ]).fetchone()
 

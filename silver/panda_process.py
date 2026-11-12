@@ -9,7 +9,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month
+from utils.io import find_file, update_pipeline_run, write_parquet, log_pipeline_run, discover_files, extract_year_month, next_pipeline_id
 from utils.validation.schema_validation import validate_schema
 from utils.validation.data_validation import (
     calculate_filter_impact,
@@ -22,19 +22,25 @@ from utils.validation.layout_validation import check_layout
 logger = logging.getLogger(__name__)
 
 
-def process(year: int, month_label: str, config_path: str, settings_path: str) -> None:
+def process(
+    year: int,
+    month_label: str,
+    config_path: str,
+    settings_path: str,
+    p_id: str | None = None,
+) -> None:
     """Process one Panda CSV file for a given year and month."""
     t0 = time.time()
-
     settings = yaml.safe_load(open(settings_path))
     source_dir = Path(settings["source"]["panda"]) / str(year)
     silver_dir = Path(settings["output"]["silver"]) / "Panda"
     db_path = settings["duckdb"]["path"]
+    p_id = p_id or next_pipeline_id(db_path)
 
     # 1. Find file
     discover_run_id = log_pipeline_run(
         db_path, "Panda", year, month_label,
-        stage="discover_file", status="running",
+        stage="discover_file", status="running", p_id=p_id,
     )
     try:
         file_path, error_message = find_file(
@@ -68,7 +74,8 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
     # 2. Read raw
     read_run_id = log_pipeline_run(
         db_path, "Panda", year, month_label,
-        stage="source_read", status="running", source_file_name=source_file_name,
+        stage="source_read", status="running", p_id=p_id,
+        source_file_name=source_file_name,
     )
     try:
         df = pl.read_csv(
@@ -91,7 +98,8 @@ def process(year: int, month_label: str, config_path: str, settings_path: str) -
 
     transform_run_id = log_pipeline_run(
         db_path, "Panda", year, month_label,
-        stage="silver_transform", status="running", source_file_name=source_file_name,
+        stage="silver_transform", status="running", p_id=p_id,
+        source_file_name=source_file_name,
     )
 
     # 3. Validate

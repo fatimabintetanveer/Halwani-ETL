@@ -41,6 +41,7 @@ def load_pipeline_runs(database_path: Path) -> pd.DataFrame:
             """
             SELECT
                 run_id,
+                p_id,
                 retailer,
                 year,
                 month,
